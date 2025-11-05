@@ -1,0 +1,203 @@
+name: Android PrimeOS with VNC and FRP Tunnel
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep_alive_duration:
+        description: 'Keep the environment alive (minutes)'
+        required: false
+        default: '60'
+
+jobs:
+  android-vnc-setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install VNC Server and Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xfce4 xfce4-goodies tightvncserver tigervnc-standalone-server \
+            tigervnc-common x11vnc dbus-x11 novnc websockify net-tools wget unzip adb fastboot
+          
+      - name: Setup VNC Server
+        run: |
+          mkdir -p ~/.vnc
+          echo "android123" | vncpasswd -f > ~/.vnc/passwd
+          chmod 600 ~/.vnc/passwd
+          
+          # Create VNC startup script
+          cat > ~/.vnc/xstartup << 'EOF'
+          #!/bin/bash
+          xrdb $HOME/.Xresources
+          startxfce4 &
+          EOF
+          
+          chmod +x ~/.vnc/xstartup
+          
+          # Start VNC server on display :1 (port 5901)
+          vncserver :1 -geometry 1920x1080 -depth 24
+          
+          # Verify VNC is running
+          sleep 5
+          netstat -tuln | grep 5901
+
+      - name: Download and Setup FRP Client
+        env:
+          FRP_VERSION: "0.52.3"
+        run: |
+          # Download FRP
+          wget https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_amd64.tar.gz
+          tar -xzf frp_${FRP_VERSION}_linux_amd64.tar.gz
+          cd frp_${FRP_VERSION}_linux_amd64
+          
+          # Create FRP client configuration
+          cat > frpc.ini << 'EOF'
+          [common]
+          server_addr = 159.195.6.61
+          server_port = 7000
+          token = ${{ secrets.FRP_TOKEN }}
+          
+          [vnc]
+          type = tcp
+          local_ip = 127.0.0.1
+          local_port = 5901
+          remote_port = 5900
+          use_encryption = false
+          use_compression = false
+          EOF
+          
+          # Start FRP client in background
+          nohup ./frpc -c frpc.ini > frpc.log 2>&1 &
+          sleep 5
+          
+          echo "FRP client started. VNC accessible at 159.195.6.61:5900"
+          cat frpc.log
+
+      - name: Setup Android SDK and Tools
+        run: |
+          # Install Android SDK command line tools
+          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+          mkdir -p $HOME/android-sdk/cmdline-tools
+          unzip commandlinetools-linux-9477386_latest.zip -d $HOME/android-sdk/cmdline-tools
+          mv $HOME/android-sdk/cmdline-tools/cmdline-tools $HOME/android-sdk/cmdline-tools/latest
+          
+          export ANDROID_HOME=$HOME/android-sdk
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+          
+          # Accept licenses
+          yes | sdkmanager --licenses
+          
+          # Install necessary packages
+          sdkmanager "platform-tools" "platforms;android-33" "system-images;android-33;google_apis_playstore;x86_64"
+
+      - name: Create and Start Android Emulator with Root
+        env:
+          DISPLAY: :1
+        run: |
+          export ANDROID_HOME=$HOME/android-sdk
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
+          
+          # Create AVD with Google Play Store
+          echo "no" | avdmanager create avd \
+            --name android_emulator \
+            --package "system-images;android-33;google_apis_playstore;x86_64" \
+            --device "pixel_5" \
+            --force
+          
+          # Start emulator with writable system for root access
+          $ANDROID_HOME/emulator/emulator \
+            -avd android_emulator \
+            -no-snapshot-save \
+            -no-window \
+            -gpu swiftshader_indirect \
+            -no-audio \
+            -memory 4096 \
+            -writable-system \
+            -no-boot-anim &
+          
+          # Wait for emulator to boot
+          adb wait-for-device
+          sleep 30
+          
+          # Root the emulator
+          adb root
+          adb remount
+          
+          # Verify root access
+          adb shell su -c "id"
+
+      - name: Install GameGuardian and Setup
+        run: |
+          # Download and install GameGuardian APK
+          wget -O gameguardian.apk "https://gameguardian.net/download/GameGuardian_101.0.apk"
+          adb install gameguardian.apk
+          
+          # Grant necessary permissions
+          adb shell pm grant catch_.me_.if_.you_.can WRITE_EXTERNAL_STORAGE
+          adb shell pm grant catch_.me_.if_.you_.can READ_EXTERNAL_STORAGE
+          
+          # Install Magisk for better root management (optional)
+          wget -O magisk.apk "https://github.com/topjohnwu/Magisk/releases/latest/download/Magisk-v27.0.apk"
+          adb install magisk.apk
+          
+          echo "GameGuardian installed successfully"
+
+      - name: Configure VNC for Android Display
+        env:
+          DISPLAY: :1
+        run: |
+          # Install scrcpy for better Android screen mirroring
+          sudo apt-get install -y scrcpy
+          
+          # Start scrcpy in VNC display
+          scrcpy --max-size 1920 --window-borderless &
+          
+          echo "Android emulator screen is now visible via VNC"
+
+      - name: Display Connection Information
+        run: |
+          echo "============================================"
+          echo "VNC Connection Details:"
+          echo "============================================"
+          echo "Server: 159.195.6.61"
+          echo "Port: 5900"
+          echo "Password: android123"
+          echo "============================================"
+          echo "ADB Commands:"
+          echo "  Root shell: adb shell su"
+          echo "  Install APK: adb install app.apk"
+          echo "  Screen: accessible via VNC viewer"
+          echo "============================================"
+          
+          # Show running services
+          netstat -tuln | grep -E '5900|5901'
+          
+          # Show emulator status
+          adb devices
+
+      - name: Keep Environment Alive
+        run: |
+          echo "Environment will stay alive for ${{ github.event.inputs.keep_alive_duration }} minutes"
+          echo "Connect to VNC at 159.195.6.61:5900"
+          echo "Use Android emulator via scrcpy in the VNC session"
+          
+          # Keep the workflow running
+          sleep $((${{ github.event.inputs.keep_alive_duration }} * 60))
+
+      - name: Cleanup
+        if: always()
+        run: |
+          # Stop emulator
+          adb emu kill
+          
+          # Stop VNC server
+          vncserver -kill :1
+          
+          # Stop FRP client
+          pkill -f frpc
+          
+          echo "Cleanup completed"
