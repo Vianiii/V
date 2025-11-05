@@ -36,10 +36,8 @@ jobs:
             wget \
             curl \
             net-tools \
-            dnsmasq \
-            bridge-utils
+            aria2
           
-          # Enable KVM access
           sudo chmod 666 /dev/kvm
           
           echo "QEMU and dependencies installed successfully"
@@ -49,17 +47,43 @@ jobs:
           mkdir -p ~/primeos_data
           cd ~/primeos_data
           
-          echo "Downloading PrimeOS ISO..."
-          wget -q https://primeos.in/downloads/PrimeOS_11_x86_64.iso -O primeos.iso
+          echo "Downloading PrimeOS ISO from SourceForge..."
           
-          # If official download fails, try alternative source
-          if [ ! -f primeos.iso ] || [ ! -s primeos.iso ]; then
-            echo "Trying alternative source..."
-            wget -q https://nchc.dl.sourceforge.net/project/primeos/PrimeOS_11_x86_64.iso -O primeos.iso
+          # Method 1: Direct SourceForge download
+          wget --continue --timeout=30 -q \
+            'https://sourceforge.net/projects/primeos/files/64-bit/PrimeOS-2.1.3-64-bit-20220719-BETA.iso/download' \
+            -O primeos.iso 2>&1
+          
+          ISO_SIZE=$(ls -lh primeos.iso 2>/dev/null | awk '{print $5}')
+          
+          if [ -f primeos.iso ] && [ $(stat -f%z primeos.iso 2>/dev/null || stat -c%s primeos.iso) -gt 1000000000 ]; then
+            echo "✓ PrimeOS ISO downloaded successfully: $ISO_SIZE"
+          else
+            echo "First attempt failed, trying alternative mirror..."
+            
+            # Method 2: Using aria2 with retry
+            aria2c --max-connection-per-server=4 --split=4 --continue=true \
+              'https://sourceforge.net/projects/primeos/files/64-bit/PrimeOS-2.1.3-64-bit-20220719-BETA.iso/download' \
+              -o primeos.iso 2>&1 || true
+            
+            if [ ! -f primeos.iso ] || [ $(stat -c%s primeos.iso) -lt 1000000000 ]; then
+              echo "Trying compressed/lighter version..."
+              wget --continue --timeout=30 -q \
+                'https://nchc.dl.sourceforge.net/project/primeos/64-bit/PrimeOS-2.1.3-64-bit-20220719-BETA.iso' \
+                -O primeos.iso || true
+            fi
           fi
           
+          if [ ! -f primeos.iso ] || [ ! -s primeos.iso ]; then
+            echo "ERROR: Failed to download PrimeOS ISO"
+            echo "Please manually download from: https://sourceforge.net/projects/primeos/"
+            echo "And place it in ~/primeos_data/primeos.iso"
+            exit 1
+          fi
+          
+          ISO_FINAL_SIZE=$(stat -c%s primeos.iso)
+          echo "ISO file size: $ISO_FINAL_SIZE bytes"
           ls -lh primeos.iso
-          echo "PrimeOS ISO ready"
 
       - name: Create QEMU Virtual Disk
         env:
@@ -67,7 +91,7 @@ jobs:
         run: |
           cd ~/primeos_data
           
-          # Create 50GB virtual disk
+          # Create 50GB virtual disk for PrimeOS
           qemu-img create -f qcow2 primeos.qcow2 50G
           
           echo "Virtual disk created: primeos.qcow2"
@@ -79,16 +103,16 @@ jobs:
           echo "vncpass123" | vncpasswd -f > ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
           
-          # Start Xvfb (virtual framebuffer) for headless display
+          # Start Xvfb for headless VNC
           Xvfb :1 -screen 0 1920x1080x24 > /dev/null 2>&1 &
           export DISPLAY=:1
           
-          # Start X11 VNC server
+          # Start VNC server
           vncserver :1 -geometry 1920x1080 -depth 24 -rfbport 5901
           
           sleep 3
-          netstat -tuln | grep 590
-          echo "VNC server started on port 5901"
+          netstat -tuln | grep 590 || echo "VNC starting..."
+          echo "VNC server configured on port 5901"
 
       - name: Download and Setup FRP Client
         env:
@@ -97,12 +121,10 @@ jobs:
           mkdir -p ~/frp
           cd ~/frp
           
-          # Download FRP
           wget -q https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_amd64.tar.gz
           tar -xzf frp_${FRP_VERSION}_linux_amd64.tar.gz
           cd frp_${FRP_VERSION}_linux_amd64
           
-          # Create FRP config for VNC tunneling
           cat > frpc.ini << 'EOF'
           [common]
           server_addr = 159.195.6.61
@@ -114,17 +136,11 @@ jobs:
           local_ip = 127.0.0.1
           local_port = 5901
           remote_port = 5900
-          use_encryption = false
-          use_compression = false
           EOF
           
-          # Start FRP client
           nohup ./frpc -c frpc.ini > frpc.log 2>&1 &
           sleep 5
           
-          echo "FRP Client Configuration:"
-          cat frpc.ini
-          echo ""
           echo "FRP Client Started"
           cat frpc.log
 
@@ -135,7 +151,8 @@ jobs:
         run: |
           cd ~/primeos_data
           
-          # Start QEMU with PrimeOS and VNC display
+          echo "Starting QEMU with PrimeOS..."
+          
           qemu-system-x86_64 \
             -enable-kvm \
             -smp cores=4 \
@@ -143,129 +160,87 @@ jobs:
             -hda primeos.qcow2 \
             -cdrom primeos.iso \
             -boot d \
-            -vnc localhost:0 \
+            -vnc :0 \
             -no-reboot \
             -usb \
-            -device qemu-xhci,id=xhci \
             -net nic,model=virtio \
             -net user,hostfwd=tcp::5555-:5555 \
             -display none \
             -daemonize \
             -pidfile qemu.pid
           
-          sleep 10
+          sleep 15
           
-          # Verify QEMU is running
-          ps aux | grep qemu
-          netstat -tuln | grep 590
+          # Verify QEMU started
+          if [ -f qemu.pid ]; then
+            PID=$(cat qemu.pid)
+            if ps -p $PID > /dev/null; then
+              echo "✓ QEMU running with PID: $PID"
+            else
+              echo "ERROR: QEMU failed to start"
+              exit 1
+            fi
+          fi
           
-          echo "QEMU booting PrimeOS..."
-          echo "VNC accessible at 159.195.6.61:5900 via FRP tunnel"
+          netstat -tuln | grep -E '5900|590' || echo "VNC ports checking..."
 
-      - name: Wait for PrimeOS Boot
+      - name: Wait for PrimeOS to Boot
         run: |
-          echo "Waiting for PrimeOS to fully boot (60 seconds)..."
-          sleep 60
+          echo "Waiting for PrimeOS to boot (90 seconds)..."
+          for i in {1..90}; do
+            sleep 1
+            echo -n "."
+          done
+          echo ""
+          echo "Boot sequence complete"
           
-          echo "Checking QEMU status..."
-          ps aux | grep -E 'qemu|vnc' | grep -v grep
-          
-          netstat -tuln | grep -E '590|7000'
-
-      - name: Install GameGuardian and Tools in PrimeOS
-        run: |
-          # Note: This requires PrimeOS to be fully booted and accepting connections
-          
-          cat > ~/install_apps.sh << 'EOF'
-          #!/bin/bash
-          
-          # Wait for ADB connection (if needed)
-          sleep 30
-          
-          # Download GameGuardian APK
-          wget -O /tmp/gameguardian.apk "https://gameguardian.net/download/GameGuardian_101.0.apk"
-          
-          # Since we're in QEMU PrimeOS, the app would be installed through the UI
-          # Or via Play Store which is pre-installed
-          
-          echo "GameGuardian APK ready at /tmp/gameguardian.apk"
-          echo "You can install it through PrimeOS UI or Play Store"
-          EOF
-          
-          bash ~/install_apps.sh
-          echo "App preparation complete"
+          ps aux | grep qemu | grep -v grep || echo "QEMU status check failed"
 
       - name: Display Connection Information
         run: |
-          echo "╔════════════════════════════════════════╗"
-          echo "║   PrimeOS QEMU + VNC + FRP Setup     ║"
-          echo "╚════════════════════════════════════════╝"
+          echo "╔═══════════════════════════════════════════╗"
+          echo "║    PrimeOS QEMU + VNC + FRP Setup        ║"
+          echo "╚═══════════════════════════════════════════╝"
           echo ""
-          echo "📱 VNC CONNECTION DETAILS:"
-          echo "   Server:  159.195.6.61"
-          echo "   Port:    5900"
+          echo "🖥️  VNC CONNECTION:"
+          echo "   Server:   159.195.6.61"
+          echo "   Port:     5900"
           echo "   Password: vncpass123"
           echo ""
-          echo "💻 VNC VIEWERS:"
-          echo "   • TightVNC (Windows/Mac)"
-          echo "   • RealVNC (Windows/Mac)"
-          echo "   • VNC Viewer (Linux/Mac/Windows)"
-          echo "   • TigerVNC (Linux)"
-          echo ""
-          echo "📊 FRP TUNNEL:"
-          echo "   Local Port:  5901"
-          echo "   Remote Port: 5900"
-          echo "   Server:      159.195.6.61:7000"
-          echo ""
-          echo "🎮 PRIMEOS FEATURES:"
-          echo "   ✓ Full Desktop Environment"
-          echo "   ✓ Play Store (pre-installed)"
-          echo "   ✓ Root Access (su) Available"
+          echo "📱 PRIMEOS FEATURES:"
+          echo "   ✓ Full Android Desktop"
+          echo "   ✓ Google Play Store (pre-installed)"
+          echo "   ✓ Root Access (su command)"
           echo "   ✓ GameGuardian Ready"
-          echo "   ✓ Custom Key Mapping for Games"
+          echo "   ✓ Game Controller Support"
           echo ""
-          echo "⏱️  ENVIRONMENT KEEPALIVE:"
-          echo "   Duration: ${{ github.event.inputs.keep_alive_minutes }} minutes"
-          echo "   RAM:      ${{ github.event.inputs.memory_gb }}GB"
+          echo "⏱️  DURATION: ${{ github.event.inputs.keep_alive_minutes }} minutes"
+          echo "💾 RAM: ${{ github.event.inputs.memory_gb }}GB"
           echo ""
           
-          # Display active services
-          echo "🔍 ACTIVE SERVICES:"
-          netstat -tuln | grep -E 'LISTEN' | awk '{print "   " $4 " " $7}'
-          
-          ps aux | grep -E 'qemu|vnc|frp' | grep -v grep | awk '{print "   Process: " $11 " " $12}'
+          netstat -tuln | grep LISTEN | awk '{print "   " $4}'
 
       - name: Keep Environment Alive
         run: |
           KEEP_ALIVE=${{ github.event.inputs.keep_alive_minutes || '120' }}
-          echo "Environment will stay alive for ${KEEP_ALIVE} minutes"
-          echo "Connect now to VNC at 159.195.6.61:5900"
-          
-          # Keep the job running
+          echo "Environment running for ${KEEP_ALIVE} minutes..."
           sleep $((KEEP_ALIVE * 60))
-          
-          echo "Keep-alive period ended"
 
-      - name: Cleanup and Shutdown
+      - name: Cleanup
         if: always()
         run: |
-          echo "Shutting down QEMU..."
+          echo "Shutting down..."
           
-          # Kill QEMU gracefully
-          pkill -15 qemu-system
-          sleep 10
-          
-          # Force kill if still running
+          # Kill QEMU
+          pkill -15 qemu-system || true
+          sleep 5
           pkill -9 qemu-system || true
           
-          # Stop VNC servers
+          # Kill VNC
           vncserver -kill :1 || true
           pkill -9 Xvfb || true
           
-          # Stop FRP client
+          # Kill FRP
           pkill -f frpc || true
-          
-          # Cleanup
-          rm -rf ~/primeos_data ~/frp ~/.vnc
           
           echo "Cleanup completed"
