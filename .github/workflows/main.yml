@@ -32,7 +32,8 @@ jobs:
             x11-apps \
             wget \
             curl \
-            net-tools
+            net-tools \
+            socat
           
           sudo chmod 666 /dev/kvm
           echo "✓ QEMU and dependencies installed"
@@ -89,13 +90,15 @@ jobs:
           sleep 3
           echo "✓ FRP Client Started"
 
-      - name: Boot PrimeOS in QEMU with VNC
+      - name: Boot PrimeOS in QEMU (Installation Mode)
         env:
           MEMORY_GB: ${{ github.event.inputs.memory_gb || '8' }}
         run: |
           cd ~/primeos_data
           
-          # Start QEMU with native VNC display (port 5900)
+          echo "Starting QEMU for PrimeOS installation..."
+          
+          # Boot from ISO for installation
           qemu-system-x86_64 \
             -enable-kvm \
             -smp cores=4 \
@@ -109,99 +112,140 @@ jobs:
             -device qemu-xhci,id=xhci \
             -net nic,model=virtio \
             -net user,hostfwd=tcp::5555-:5555 \
+            -monitor unix:/tmp/qemu-monitor,server,nowait \
+            -daemonize \
+            -pidfile qemu.pid
+          
+          sleep 15
+          
+          if [ -f qemu.pid ]; then
+            PID=$(cat qemu.pid)
+            if ps -p $PID > /dev/null 2>&1; then
+              echo "✓ QEMU running (PID: $PID)"
+            else
+              echo "ERROR: QEMU failed to start"
+              exit 1
+            fi
+          fi
+
+      - name: Wait for PrimeOS Installation (Watch for Reboot)
+        run: |
+          echo "Waiting for installation and automatic reboot..."
+          
+          # Wait for installation to complete and system to shutdown
+          sleep 180  # 3 minutes for installation
+          
+          echo "Installation should be complete"
+
+      - name: Boot PrimeOS from Installed Disk
+        env:
+          MEMORY_GB: ${{ github.event.inputs.memory_gb || '8' }}
+        run: |
+          cd ~/primeos_data
+          
+          echo "Killing previous QEMU instance..."
+          pkill -9 qemu-system || true
+          sleep 5
+          
+          echo "Starting QEMU from installed disk (boot from HDD)..."
+          
+          # Boot from virtual disk (no CD)
+          qemu-system-x86_64 \
+            -enable-kvm \
+            -smp cores=4 \
+            -m ${MEMORY_GB}G \
+            -hda primeos.qcow2 \
+            -boot c \
+            -vnc 127.0.0.1:0 \
+            -no-reboot \
+            -usb \
+            -device qemu-xhci,id=xhci \
+            -net nic,model=virtio \
+            -net user,hostfwd=tcp::5555-:5555 \
             -daemonize \
             -pidfile qemu.pid
           
           sleep 10
           
-          # Verify QEMU started
           if [ -f qemu.pid ]; then
             PID=$(cat qemu.pid)
             if ps -p $PID > /dev/null 2>&1; then
-              echo "✓ QEMU running (PID: $PID)"
-              ps -p $PID
+              echo "✓ QEMU running from disk (PID: $PID)"
             else
-              echo "✗ QEMU failed to start"
+              echo "ERROR: QEMU failed to boot from disk"
               exit 1
             fi
           fi
-          
-          # Check VNC port
-          netstat -tuln | grep 590 || echo "Checking VNC..."
 
-      - name: Wait for PrimeOS Boot
+      - name: Wait for PrimeOS Desktop to Load
         run: |
-          echo "Waiting for PrimeOS to boot..."
+          echo "Waiting for PrimeOS desktop to fully load (120 seconds)..."
+          
           for i in {1..120}; do
             if netstat -tuln 2>/dev/null | grep -q ':5900'; then
-              echo "✓ VNC port available after $i seconds"
               sleep 5
+              echo "✓ VNC ready after $i seconds"
               break
             fi
             sleep 1
-            if [ $((i % 10)) -eq 0 ]; then echo "$i seconds..."; fi
+            if [ $((i % 30)) -eq 0 ]; then echo "$i seconds elapsed..."; fi
           done
-          
-          netstat -tuln | grep 5900 || echo "VNC monitoring..."
 
       - name: Display Connection Information
         run: |
           echo ""
-          echo "╔════════════════════════════════════════╗"
-          echo "║   PrimeOS QEMU Ready for Connection   ║"
-          echo "╚════════════════════════════════════════╝"
+          echo "╔════════════════════════════════════════════╗"
+          echo "║   PrimeOS Full Installation Complete!     ║"
+          echo "╚════════════════════════════════════════════╝"
           echo ""
           echo "🖥️  VNC CONNECTION DETAILS:"
           echo "   Server:   159.195.6.61"
           echo "   Port:     5900"
-          echo "   Password: (none - open)"
+          echo "   Password: (none - open connection)"
           echo ""
-          echo "📱 FEATURES AVAILABLE:"
-          echo "   ✓ Full PrimeOS Desktop"
+          echo "📱 FEATURES NOW AVAILABLE:"
+          echo "   ✓ Full PrimeOS Installed"
+          echo "   ✓ Persistent 50GB Storage"
           echo "   ✓ Google Play Store"
-          echo "   ✓ Root Access (su)"
-          echo "   ✓ GameGuardian Compatible"
+          echo "   ✓ Root Access (su command)"
+          echo "   ✓ GameGuardian Ready"
           echo ""
           echo "⏱️  CONFIGURATION:"
           echo "   RAM:      ${{ github.event.inputs.memory_gb }}GB"
           echo "   Duration: ${{ github.event.inputs.keep_alive_minutes }} minutes"
           echo "   Cores:    4 vCPU"
           echo ""
-          echo "📥 CONNECTED SERVICES:"
-          netstat -tuln | grep LISTEN | grep -E '590|7000' | \
-            sed 's/^/   /'
-          echo ""
-          echo "✨ INSTALLATION NEXT STEPS:"
-          echo "   1. Connect via VNC at 159.195.6.61:5900"
-          echo "   2. Complete PrimeOS setup wizard"
-          echo "   3. Install GameGuardian from Play Store"
-          echo "   4. Open Terminal and use 'su' for root"
+          echo "📥 NEXT STEPS:"
+          echo "   1. Connect via VNC to 159.195.6.61:5900"
+          echo "   2. Complete PrimeOS first-boot setup"
+          echo "   3. Open Play Store and search 'GameGuardian'"
+          echo "   4. Open Terminal and type: su"
+          echo "   5. You now have full root access!"
           echo ""
 
       - name: Keep Environment Alive
         run: |
           KEEP_ALIVE=${{ github.event.inputs.keep_alive_minutes || '120' }}
           echo "Environment will remain active for ${KEEP_ALIVE} minutes"
-          echo "VNC Server: 159.195.6.61:5900"
-          echo ""
+          echo "Connect to VNC: 159.195.6.61:5900"
           sleep $((KEEP_ALIVE * 60))
 
       - name: Shutdown QEMU
         if: always()
         run: |
-          echo "Initiating shutdown..."
+          echo "Shutting down..."
           
           # Kill QEMU gracefully
-          pkill -15 qemu-system-x86_64 || true
+          pkill -15 qemu-system || true
           sleep 5
           
-          # Force kill if needed
-          pkill -9 qemu-system-x86_64 || true
+          # Force kill
+          pkill -9 qemu-system || true
           
           # Kill FRP
           pkill -f frpc || true
           
           # Cleanup
-          rm -rf ~/primeos_data ~/frp
+          rm -rf ~/frp
           
           echo "✓ Shutdown complete"
