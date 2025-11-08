@@ -1,4 +1,4 @@
-name: Ubuntu Desktop
+name: Ubuntu Desktop VNC (Fixed)
 
 on:
   workflow_dispatch:
@@ -7,161 +7,265 @@ on:
 
 jobs:
   ubuntu-desktop:
-    runs-on: ubuntu-latest  # For 16GB RAM, use: ubuntu-24.04-16core or self-hosted runner
+    runs-on: ubuntu-latest
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          df -h
+
       - name: Set up /mnt storage
         run: |
           sudo mkdir -p /mnt/storage
           sudo chmod 777 /mnt/storage
+          echo "Storage mounted at /mnt/storage"
           df -h /mnt
 
-      - name: Install Ubuntu Desktop Environment (XFCE)
+      - name: Install Desktop Environment & VNC
         run: |
+          echo "Installing desktop environment..."
           sudo apt-get update
+          
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             xfce4 \
             xfce4-goodies \
+            xfce4-terminal \
             dbus-x11 \
             x11-xserver-utils \
             tigervnc-standalone-server \
             tigervnc-common \
+            tigervnc-xorg-extension \
             fonts-liberation \
             firefox \
             nano \
             net-tools \
             wget \
-            curl
+            curl \
+            htop
+          
+          echo "Installation complete!"
 
-      - name: Configure VNC Server
+      - name: Configure VNC Password and Settings
         run: |
           mkdir -p ~/.vnc
           
-          # Set VNC password (change 'password' to your desired password)
-          echo "password" | vncpasswd -f > ~/.vnc/passwd
+          # Set VNC password
+          echo "github2024" | vncpasswd -f > ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
+          echo "VNC password configured"
           
-          # Create xstartup script for XFCE
-          cat > ~/.vnc/xstartup << 'EOF'
+          # Create optimized xstartup for smooth animations
+          cat > ~/.vnc/xstartup << 'EOFVNC'
           #!/bin/bash
+          
+          # Unset session manager
           unset SESSION_MANAGER
           unset DBUS_SESSION_BUS_ADDRESS
+          
+          # Setup environment
           export XKL_XMODMAP_DISABLE=1
-          export XDG_RUNTIME_DIR=/tmp/runtime-$USER
+          export XDG_RUNTIME_DIR=/tmp/runtime-runner
           mkdir -p $XDG_RUNTIME_DIR
           chmod 700 $XDG_RUNTIME_DIR
           
-          [ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup
+          # Start D-Bus
+          if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+              eval $(dbus-launch --sh-syntax)
+          fi
+          
+          # Load resources
           [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
+          xsetroot -solid "#2E3440"
           
-          xrdb $HOME/.Xresources
-          xsetroot -solid grey
-          
-          # Enable compositor for smooth animations
-          xfwm4 --compositor=on &
-          xfce4-panel &
-          xfdesktop &
-          xfce4-session &
-          EOF
+          # Start XFCE with compositor for smooth animations
+          startxfce4 &
+          EOFVNC
           
           chmod +x ~/.vnc/xstartup
+          cat ~/.vnc/xstartup
           
-          # Configure VNC config for better performance
-          cat > ~/.vnc/config << 'EOF'
+          # Create VNC config for optimal settings
+          cat > ~/.vnc/config << 'EOFCONFIG'
           geometry=1920x1080
           dpi=96
+          depth=24
           localhost=no
-          alwaysshared
-          EOF
+          alwaysshared=true
+          EOFCONFIG
+          
+          cat ~/.vnc/config
 
       - name: Start VNC Server
         run: |
-          # Start VNC server on display :0 (port 5900)
+          echo "Starting VNC server..."
+          
+          # Kill any existing VNC sessions
+          vncserver -kill :0 2>/dev/null || true
+          sleep 2
+          
+          # Start VNC on display :0 (port 5900)
           vncserver :0 -geometry 1920x1080 -depth 24 -localhost no
+          
           sleep 5
           
           # Verify VNC is running
-          ps aux | grep vnc
-          netstat -tulpn | grep 5900 || true
-
-      - name: Download and Configure FRP Client
-        env:
-          FRP_VERSION: "0.60.0"  # Update to latest version if needed
-        run: |
-          # Download FRP
-          wget https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_amd64.tar.gz
-          tar -xzf frp_${FRP_VERSION}_linux_amd64.tar.gz
-          cd frp_${FRP_VERSION}_linux_amd64
+          echo "=== VNC Process Check ==="
+          ps aux | grep -i vnc
           
-          # Create FRP client configuration
-          cat > frpc.toml << 'EOF'
+          echo "=== VNC Port Check ==="
+          netstat -tulpn | grep 5900 || ss -tulpn | grep 5900
+          
+          echo "=== VNC Log ==="
+          cat ~/.vnc/*.log 2>/dev/null || echo "No VNC logs found"
+          
+          # Test VNC locally
+          echo "=== Testing VNC locally ==="
+          timeout 5 nc -zv localhost 5900 || echo "Local VNC test failed"
+
+      - name: Download and Setup FRP Client
+        run: |
+          echo "Downloading FRP client..."
+          FRP_VERSION="0.60.0"
+          wget -q https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_amd64.tar.gz
+          tar -xzf frp_${FRP_VERSION}_linux_amd64.tar.gz
+          mv frp_${FRP_VERSION}_linux_amd64 frp
+          cd frp
+          
+          # Create FRP client config
+          cat > frpc.toml << 'EOFFRP'
           serverAddr = "159.195.6.61"
           serverPort = 7000
           
+          # Connection settings
+          loginFailExit = false
+          
+          # Log settings
+          log.level = "info"
+          log.maxDays = 3
+          
+          # Proxy configuration
           [[proxies]]
-          name = "vnc-desktop"
+          name = "github-vnc-desktop"
           type = "tcp"
           localIP = "127.0.0.1"
           localPort = 5900
           remotePort = 5900
-          EOF
+          EOFFRP
           
-          # Display config for verification
+          echo "FRP config created:"
           cat frpc.toml
 
-      - name: Start FRP Client and Tunnel VNC
+      - name: Start FRP Tunnel
         run: |
-          cd frp_*_linux_amd64
+          cd frp
           
-          # Start FRP client in background
+          echo "Starting FRP client..."
           nohup ./frpc -c frpc.toml > frpc.log 2>&1 &
-          sleep 5
+          FRP_PID=$!
           
-          # Check FRP status
+          sleep 8
+          
+          # Check if FRP is running
+          echo "=== FRP Process Check ==="
+          ps aux | grep frpc | grep -v grep
+          
+          echo "=== FRP Logs ==="
           cat frpc.log
-          ps aux | grep frpc
-
-      - name: Display Connection Information
-        run: |
-          echo "======================================"
-          echo "VNC Desktop is now accessible!"
-          echo "======================================"
-          echo "VNC Server: 159.195.6.61:5900"
-          echo "VNC Password: password"
-          echo "Resolution: 1920x1080"
-          echo "Desktop Environment: XFCE4"
-          echo ""
-          echo "Connect using any VNC client:"
-          echo "- RealVNC Viewer"
-          echo "- TigerVNC Viewer"
-          echo "- TightVNC"
-          echo "- Remmina (Linux)"
-          echo ""
-          echo "Storage mounted at: /mnt/storage"
-          echo "======================================"
-
-      - name: Keep Alive
-        run: |
-          echo "Keeping workflow alive..."
-          echo "Press Ctrl+C in Actions runner or cancel the workflow to stop"
           
-          # Monitor logs and keep connection alive
+          # Verify FRP connection
+          if grep -q "start proxy success" frpc.log; then
+            echo "✅ FRP tunnel established successfully!"
+          elif grep -q "login to server success" frpc.log; then
+            echo "✅ FRP connected to server!"
+          else
+            echo "⚠️  FRP connection status unclear, check logs above"
+          fi
+
+      - name: Display Connection Info
+        run: |
+          echo ""
+          echo "╔════════════════════════════════════════════════════════╗"
+          echo "║       VNC DESKTOP READY - CONNECTION INFO             ║"
+          echo "╚════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "📡 VNC Server Address: 159.195.6.61:5900"
+          echo "🔑 VNC Password: github2024"
+          echo "🖥️  Resolution: 1920x1080 @ 24-bit"
+          echo "🎨 Desktop: XFCE4 with compositor (smooth animations)"
+          echo "💾 Storage: /mnt/storage"
+          echo ""
+          echo "🔌 Connect with VNC clients:"
+          echo "   • RealVNC Viewer"
+          echo "   • TigerVNC Viewer"  
+          echo "   • TightVNC"
+          echo "   • Remmina (Linux)"
+          echo ""
+          echo "⏰ Session will stay alive for up to 6 hours"
+          echo "════════════════════════════════════════════════════════"
+          echo ""
+
+      - name: Keep Session Alive
+        run: |
+          echo "🟢 Session is now ACTIVE - Keeping workflow alive..."
+          echo "You can now connect to the VNC desktop"
+          echo ""
+          
+          COUNTER=0
           while true; do
-            echo "=== Status Check $(date) ==="
-            echo "VNC Process:"
-            ps aux | grep -E "vnc|Xtigervnc" | grep -v grep || echo "VNC not running!"
+            COUNTER=$((COUNTER + 1))
+            TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+            
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📊 Health Check #${COUNTER} - ${TIMESTAMP}"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            
+            # Check VNC
+            if pgrep -f "Xtigervnc" > /dev/null; then
+              echo "✅ VNC Server: Running"
+            else
+              echo "❌ VNC Server: NOT RUNNING - Attempting restart..."
+              vncserver :0 -geometry 1920x1080 -depth 24 -localhost no
+            fi
+            
+            # Check FRP
+            if pgrep -f "frpc" > /dev/null; then
+              echo "✅ FRP Client: Running"
+            else
+              echo "❌ FRP Client: NOT RUNNING - Attempting restart..."
+              cd frp && nohup ./frpc -c frpc.toml >> frpc.log 2>&1 &
+            fi
+            
+            # Show active connections
             echo ""
-            echo "FRP Process:"
-            ps aux | grep frpc | grep -v grep || echo "FRP not running!"
+            echo "🌐 Active VNC Connections:"
+            netstat -tn | grep :5900 | grep ESTABLISHED || echo "   No active connections"
+            
+            # Disk usage
             echo ""
-            echo "Network Connections:"
-            netstat -tulpn | grep -E "5900|7000" || true
+            echo "💾 Disk Usage:"
+            df -h / | tail -n 1
+            df -h /mnt | tail -n 1
+            
+            # Memory
             echo ""
-            echo "Disk Usage:"
-            df -h /mnt
-            echo "=============================="
-            sleep 300  # Check every 5 minutes
+            echo "🧠 Memory Usage:"
+            free -h | grep Mem
+            
+            # Show recent FRP logs
+            echo ""
+            echo "📝 Recent FRP Activity:"
+            tail -n 3 frp/frpc.log 2>/dev/null || echo "   No recent logs"
+            
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            
+            # Check every 3 minutes
+            sleep 180
           done
