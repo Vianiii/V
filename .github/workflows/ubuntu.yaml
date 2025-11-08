@@ -24,6 +24,30 @@ jobs:
           
           df -h /mnt
 
+      - name: Enable KVM
+        run: |
+          echo "🚀 Enabling KVM for Android Emulator acceleration..."
+          
+          # Set KVM permissions
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          
+          # Reload udev rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          
+          # Verify KVM is available
+          if [ -e /dev/kvm ]; then
+            echo "✅ KVM device exists at /dev/kvm"
+            ls -la /dev/kvm
+          else
+            echo "⚠️ KVM device not found - emulator will run without hardware acceleration"
+          fi
+          
+          # Check KVM support
+          if command -v kvm-ok &> /dev/null; then
+            kvm-ok || true
+          fi
+
       - name: Install KDE Plasma Desktop
         run: |
           echo "Installing KDE Plasma - Most Beautiful Linux Desktop 🎨"
@@ -48,7 +72,8 @@ jobs:
             net-tools \
             htop \
             openjdk-17-jdk \
-            unzip
+            unzip \
+            cpu-checker
           
           echo "✅ KDE Plasma installed successfully!"
 
@@ -317,6 +342,14 @@ jobs:
           SDK_SIZE=$(du -sh /mnt/storage/android-sdk 2>/dev/null | cut -f1)
           AVD_SIZE=$(du -sh /mnt/storage/android-avd 2>/dev/null | cut -f1)
           
+          # Check KVM status
+          KVM_STATUS="Disabled"
+          if [ -e /dev/kvm ]; then
+            KVM_STATUS="✅ Enabled (/dev/kvm)"
+          else
+            KVM_STATUS="⚠️ Not available"
+          fi
+          
           echo ""
           echo "╔═══════════════════════════════════════════════════════╗"
           echo "║    🎨 KDE PLASMA + ANDROID STUDIO READY! 🎨          ║"
@@ -333,6 +366,7 @@ jobs:
           echo "║  • AVD Location: /mnt/storage/android-avd ($AVD_SIZE)║"
           echo "║  • Platform: Android 34 (API 34)                     ║"
           echo "║  • Emulator: x86_64 system image installed           ║"
+          echo "║  • KVM Acceleration: $KVM_STATUS                     ║"
           echo "║                                                       ║"
           echo "║  🚀 Launch Android Studio:                            ║"
           echo "║     /mnt/storage/android-studio/bin/studio.sh        ║"
@@ -388,6 +422,11 @@ jobs:
             # Check Android Studio
             if pgrep -f "android-studio" > /dev/null; then
               echo "📱 Android Studio: Running"
+            fi
+            
+            # Check KVM
+            if [ -e /dev/kvm ]; then
+              echo "⚡ KVM: Available for emulator acceleration"
             fi
             
             # Active connections
