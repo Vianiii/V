@@ -25,28 +25,13 @@ jobs:
           df -h /mnt
 
       - name: Enable KVM
+      - name: Enable KVM
         run: |
-          echo "🚀 Enabling KVM for Android Emulator acceleration..."
-          
-          # Set KVM permissions
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          
-          # Reload udev rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-          
-          # Verify KVM is available
-          if [ -e /dev/kvm ]; then
-            echo "✅ KVM device exists at /dev/kvm"
-            ls -la /dev/kvm
-          else
-            echo "⚠️ KVM device not found - emulator will run without hardware acceleration"
-          fi
-          
-          # Check KVM support
-          if command -v kvm-ok &> /dev/null; then
-            kvm-ok || true
-          fi
+          sudo chmod 666 /dev/kvm 2>/dev/null || true
+          ls -la /dev/kvm
 
       - name: Install KDE Plasma Desktop
         run: |
