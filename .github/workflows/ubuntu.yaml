@@ -1,4 +1,4 @@
-name: KDE Plasma Desktop VNC
+name: KDE Plasma Desktop VNC with Android Studio
 
 on:
   workflow_dispatch:
@@ -17,6 +17,11 @@ jobs:
         run: |
           sudo mkdir -p /mnt/storage
           sudo chmod 777 /mnt/storage
+          
+          # Create Android SDK and AVD directories in /mnt
+          mkdir -p /mnt/storage/android-sdk
+          mkdir -p /mnt/storage/android-avd
+          
           df -h /mnt
 
       - name: Install KDE Plasma Desktop
@@ -41,9 +46,126 @@ jobs:
             wget \
             curl \
             net-tools \
-            htop
+            htop \
+            openjdk-17-jdk \
+            unzip
           
           echo "✅ KDE Plasma installed successfully!"
+
+      - name: Install Android Command Line Tools
+        run: |
+          echo "📱 Installing Android SDK Command Line Tools..."
+          
+          cd /mnt/storage/android-sdk
+          
+          # Download latest command line tools
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdtools.zip
+          unzip -q cmdtools.zip
+          rm cmdtools.zip
+          
+          # Organize cmdline-tools structure (required by Android)
+          mkdir -p cmdline-tools/latest
+          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+          
+          echo "✅ Android Command Line Tools installed"
+
+      - name: Set Android Environment Variables
+        run: |
+          # Set environment variables for this session
+          echo "export ANDROID_HOME=/mnt/storage/android-sdk" >> $GITHUB_ENV
+          echo "export ANDROID_SDK_ROOT=/mnt/storage/android-sdk" >> $GITHUB_ENV
+          echo "export ANDROID_AVD_HOME=/mnt/storage/android-avd" >> $GITHUB_ENV
+          echo "export PATH=$PATH:/mnt/storage/android-sdk/cmdline-tools/latest/bin:/mnt/storage/android-sdk/platform-tools:/mnt/storage/android-sdk/emulator" >> $GITHUB_ENV
+          
+          # Also create persistent config for VNC session
+          mkdir -p ~/.profile.d
+          cat > ~/.profile.d/android.sh << 'EOFENV'
+          export ANDROID_HOME=/mnt/storage/android-sdk
+          export ANDROID_SDK_ROOT=/mnt/storage/android-sdk
+          export ANDROID_AVD_HOME=/mnt/storage/android-avd
+          export PATH=$PATH:/mnt/storage/android-sdk/cmdline-tools/latest/bin
+          export PATH=$PATH:/mnt/storage/android-sdk/platform-tools
+          export PATH=$PATH:/mnt/storage/android-sdk/emulator
+          export PATH=$PATH:/mnt/storage/android-sdk/build-tools/34.0.0
+          EOFENV
+          
+          # Source it
+          source ~/.profile.d/android.sh
+          
+          echo "✅ Android environment variables configured"
+
+      - name: Install Android SDK Components
+        run: |
+          export ANDROID_HOME=/mnt/storage/android-sdk
+          export ANDROID_SDK_ROOT=/mnt/storage/android-sdk
+          export PATH=$PATH:/mnt/storage/android-sdk/cmdline-tools/latest/bin
+          
+          cd /mnt/storage/android-sdk
+          
+          echo "📦 Installing Android SDK components..."
+          
+          # Accept licenses
+          yes | cmdline-tools/latest/bin/sdkmanager --licenses
+          
+          # Install essential SDK components
+          cmdline-tools/latest/bin/sdkmanager \
+            "platform-tools" \
+            "platforms;android-34" \
+            "platforms;android-33" \
+            "build-tools;34.0.0" \
+            "emulator" \
+            "system-images;android-34;google_apis;x86_64"
+          
+          echo "✅ Android SDK components installed"
+
+      - name: Download Android Studio
+        run: |
+          echo "💿 Downloading Android Studio..."
+          
+          cd /mnt/storage
+          
+          # Download latest Android Studio
+          wget -q https://redirector.gvt1.com/edgedl/android/studio/ide-zips/2024.2.1.11/android-studio-2024.2.1.11-linux.tar.gz -O android-studio.tar.gz
+          
+          tar -xzf android-studio.tar.gz
+          rm android-studio.tar.gz
+          
+          echo "✅ Android Studio downloaded and extracted"
+
+      - name: Configure Android Studio
+        run: |
+          echo "⚙️ Configuring Android Studio..."
+          
+          # Create Android Studio config directory
+          mkdir -p ~/.config/Google/AndroidStudio2024.2
+          
+          # Create idea.properties to set custom paths
+          cat > ~/.config/Google/AndroidStudio2024.2/idea.properties << 'EOFPROPS'
+          # Custom Android SDK location
+          android.sdk.path=/mnt/storage/android-sdk
+          
+          # Custom AVD location
+          avd.home=/mnt/storage/android-avd
+          EOFPROPS
+          
+          # Create desktop launcher
+          mkdir -p ~/.local/share/applications
+          cat > ~/.local/share/applications/android-studio.desktop << 'EOFDESKTOP'
+          [Desktop Entry]
+          Version=1.0
+          Type=Application
+          Name=Android Studio
+          Icon=/mnt/storage/android-studio/bin/studio.png
+          Exec=/mnt/storage/android-studio/bin/studio.sh
+          Comment=Android Development IDE
+          Categories=Development;IDE;
+          Terminal=false
+          StartupWMClass=jetbrains-studio
+          EOFDESKTOP
+          
+          chmod +x ~/.local/share/applications/android-studio.desktop
+          
+          echo "✅ Android Studio configured"
 
       - name: Configure VNC for KDE Plasma
         run: |
@@ -68,6 +190,11 @@ jobs:
           
           # Set background
           xsetroot -solid "#1e1e2e"
+          
+          # Load Android environment variables
+          if [ -f ~/.profile.d/android.sh ]; then
+              source ~/.profile.d/android.sh
+          fi
           
           # Start KDE Plasma
           export XDG_SESSION_TYPE=x11
@@ -184,22 +311,31 @@ jobs:
 
       - name: Display Connection Info
         run: |
+          export ANDROID_HOME=/mnt/storage/android-sdk
+          
+          # Get disk usage
+          SDK_SIZE=$(du -sh /mnt/storage/android-sdk 2>/dev/null | cut -f1)
+          AVD_SIZE=$(du -sh /mnt/storage/android-avd 2>/dev/null | cut -f1)
+          
           echo ""
           echo "╔═══════════════════════════════════════════════════════╗"
-          echo "║          🎨 KDE PLASMA DESKTOP READY! 🎨             ║"
+          echo "║    🎨 KDE PLASMA + ANDROID STUDIO READY! 🎨          ║"
           echo "╠═══════════════════════════════════════════════════════╣"
           echo "║                                                       ║"
           echo "║  📡 VNC Address: 159.195.6.61:5900                   ║"
           echo "║  🔑 Password: github2024                              ║"
           echo "║  🖥️  Resolution: 1920x1080 Full HD                    ║"
-          echo "║  🎨 Desktop: KDE Plasma (Most Beautiful UI)          ║"
-          echo "║  💾 Storage: /mnt/storage                             ║"
+          echo "║  🎨 Desktop: KDE Plasma                               ║"
           echo "║                                                       ║"
-          echo "║  Features:                                            ║"
-          echo "║  ✨ Smooth animations & transparency effects          ║"
-          echo "║  🎯 Modern, polished interface                        ║"
-          echo "║  🎭 Highly customizable appearance                    ║"
-          echo "║  🚀 Fast and responsive                               ║"
+          echo "║  📱 Android Development:                              ║"
+          echo "║  • Android Studio: /mnt/storage/android-studio       ║"
+          echo "║  • SDK Location: /mnt/storage/android-sdk ($SDK_SIZE)║"
+          echo "║  • AVD Location: /mnt/storage/android-avd ($AVD_SIZE)║"
+          echo "║  • Platform: Android 34 (API 34)                     ║"
+          echo "║  • Emulator: x86_64 system image installed           ║"
+          echo "║                                                       ║"
+          echo "║  🚀 Launch Android Studio:                            ║"
+          echo "║     /mnt/storage/android-studio/bin/studio.sh        ║"
           echo "║                                                       ║"
           echo "║  Apps Included:                                       ║"
           echo "║  • Konsole (Terminal)                                 ║"
@@ -214,7 +350,7 @@ jobs:
 
       - name: Keep Alive with Monitoring
         run: |
-          echo "🟢 KDE PLASMA SESSION ACTIVE"
+          echo "🟢 KDE PLASMA + ANDROID STUDIO SESSION ACTIVE"
           echo ""
           
           COUNT=0
@@ -249,6 +385,11 @@ jobs:
               echo "ℹ️  KDE Plasma: Starting (will start on first connection)"
             fi
             
+            # Check Android Studio
+            if pgrep -f "android-studio" > /dev/null; then
+              echo "📱 Android Studio: Running"
+            fi
+            
             # Active connections
             CONNECTIONS=$(sudo netstat -tn 2>/dev/null | grep :5900 | grep ESTABLISHED | wc -l)
             if [ "$CONNECTIONS" -gt 0 ]; then
@@ -258,7 +399,8 @@ jobs:
             fi
             
             # System resources
-            echo "💾 Disk: $(df -h / | tail -1 | awk '{print $5 " used"}')"
+            echo "💾 Root: $(df -h / | tail -1 | awk '{print $5 " used"}')"
+            echo "💾 /mnt: $(df -h /mnt | tail -1 | awk '{print $5 " used (" $4 " free)"}')"
             echo "🧠 Memory: $(free -h | grep Mem | awk '{print $3 "/" $2}')"
             
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
