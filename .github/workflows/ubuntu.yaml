@@ -1,4 +1,4 @@
-name: Ubuntu Desktop VNC (Fixed v2)
+name: KDE Plasma Desktop VNC
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     branches: [ main ]
 
 jobs:
-  ubuntu-desktop:
+  kde-desktop:
     runs-on: ubuntu-latest
     
     steps:
@@ -19,71 +19,69 @@ jobs:
           sudo chmod 777 /mnt/storage
           df -h /mnt
 
-      - name: Install Desktop Environment & VNC
+      - name: Install KDE Plasma Desktop
         run: |
-          echo "Installing desktop environment..."
+          echo "Installing KDE Plasma - Most Beautiful Linux Desktop 🎨"
+          
           sudo apt-get update
           
+          # Install KDE Plasma Desktop with essential apps
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            xfce4 \
-            xfce4-goodies \
-            xfce4-terminal \
-            dbus-x11 \
-            x11-xserver-utils \
+            kde-plasma-desktop \
+            plasma-nm \
+            plasma-workspace-wayland \
+            konsole \
+            dolphin \
+            kate \
+            firefox \
             tigervnc-standalone-server \
             tigervnc-common \
-            tigervnc-xorg-extension \
-            fonts-liberation \
-            firefox \
-            nano \
-            net-tools \
+            dbus-x11 \
+            fonts-noto-color-emoji \
             wget \
             curl \
+            net-tools \
             htop
           
-          echo "Installation complete!"
+          echo "✅ KDE Plasma installed successfully!"
 
-      - name: Configure VNC
+      - name: Configure VNC for KDE Plasma
         run: |
           mkdir -p ~/.vnc
           
-          # Set VNC password
+          # VNC password
           echo "github2024" | vncpasswd -f > ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
           
-          # Create simplified xstartup (more stable)
+          # Create xstartup for KDE Plasma
           cat > ~/.vnc/xstartup << 'EOFVNC'
-          #!/bin/sh
+          #!/bin/bash
+          
+          # Unset session managers
           unset SESSION_MANAGER
           unset DBUS_SESSION_BUS_ADDRESS
           
-          export XKL_XMODMAP_DISABLE=1
-          
-          # Start dbus
-          if test -z "$DBUS_SESSION_BUS_ADDRESS"; then
-              eval `dbus-launch --sh-syntax`
+          # Start D-Bus
+          if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
+              eval $(dbus-launch --sh-syntax --exit-with-session)
           fi
           
-          # Background color
-          xsetroot -solid grey -cursor_name left_ptr
+          # Set background
+          xsetroot -solid "#1e1e2e"
           
-          # Start window manager first
-          xfwm4 --compositor=on --daemon --sm-client-disable
+          # Start KDE Plasma
+          export XDG_SESSION_TYPE=x11
+          export XDG_SESSION_DESKTOP=KDE
+          export XDG_CURRENT_DESKTOP=KDE
+          export DESKTOP_SESSION=plasma
           
-          # Start panel and desktop
-          xfce4-panel --disable-wm-check --sm-client-disable &
-          xfdesktop --disable-wm-check --sm-client-disable &
-          
-          # Start terminal 
-          xfce4-terminal &
-          
-          # Keep session alive
-          exec tail -f /dev/null
+          # Launch Plasma session
+          startplasma-x11
           EOFVNC
           
           chmod +x ~/.vnc/xstartup
           
-          # VNC config
+          # VNC config for best quality
           cat > ~/.vnc/config << 'EOFCONFIG'
           geometry=1920x1080
           dpi=96
@@ -92,180 +90,178 @@ jobs:
           alwaysshared=true
           EOFCONFIG
           
-          echo "VNC configured"
+          echo "✅ VNC configured for KDE Plasma"
 
       - name: Start VNC Server
         run: |
-          echo "Starting VNC server..."
+          echo "🚀 Starting VNC server with KDE Plasma..."
           
-          # Kill any existing sessions
+          # Clean up any existing sessions
           vncserver -kill :0 2>/dev/null || true
           rm -f /tmp/.X0-lock /tmp/.X11-unix/X0 2>/dev/null || true
           sleep 2
           
           # Start VNC
-          vncserver :0 -geometry 1920x1080 -depth 24 -localhost no 2>&1 | tee vnc_start.log
+          vncserver :0 -geometry 1920x1080 -depth 24 -localhost no
           
-          # Wait for VNC to initialize
-          echo "Waiting for VNC to start..."
+          # Wait for VNC to start
+          echo "Waiting for VNC initialization..."
           for i in {1..30}; do
             if pgrep -f "Xtigervnc.*:0" > /dev/null; then
-              echo "✅ VNC server process found!"
+              echo "✅ VNC server started successfully!"
               break
             fi
-            echo "Attempt $i/30: Waiting for VNC process..."
             sleep 1
           done
           
-          # Final verification
+          # Display status
           echo ""
-          echo "=== VNC Process Status ==="
-          pgrep -a "Xtigervnc" || echo "❌ No VNC process found"
+          echo "=== VNC Status ==="
+          pgrep -a "Xtigervnc" || echo "⚠️  VNC process not found"
+          sudo netstat -tulpn | grep 5900 || echo "⚠️  Port 5900 not listening"
           
-          echo ""
-          echo "=== VNC Port Status ==="
-          sudo netstat -tulpn | grep 5900 || sudo ss -tulpn | grep 5900 || echo "⚠️  Port 5900 not listening"
-          
-          echo ""
-          echo "=== VNC Logs ==="
-          ls -la ~/.vnc/
-          cat ~/.vnc/*:0.log 2>/dev/null || cat vnc_start.log || echo "No logs available"
+          # Show logs if available
+          if [ -f ~/.vnc/*.log ]; then
+            echo ""
+            echo "=== VNC Logs ==="
+            tail -20 ~/.vnc/*:0.log
+          fi
 
-      - name: Verify VNC is Running
+      - name: Verify VNC Running
         run: |
           if ! pgrep -f "Xtigervnc.*:0" > /dev/null; then
-            echo "❌ ERROR: VNC server is not running!"
-            echo "Last VNC log:"
-            cat ~/.vnc/*:0.log 2>/dev/null || echo "No log file"
+            echo "❌ VNC server failed to start!"
+            cat ~/.vnc/*:0.log 2>/dev/null || echo "No logs available"
             exit 1
           fi
-          
-          echo "✅ VNC server is running"
-          
-          # Test connection locally
-          timeout 3 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/5900' && echo "✅ Port 5900 is accepting connections" || echo "⚠️  Port test unclear"
+          echo "✅ VNC is running"
 
-      - name: Download and Setup FRP Client
+      - name: Download and Setup FRP
         run: |
-          echo "Downloading FRP..."
+          echo "📡 Setting up FRP tunnel..."
           FRP_VERSION="0.60.0"
           wget -q https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_amd64.tar.gz
           tar -xzf frp_${FRP_VERSION}_linux_amd64.tar.gz
           mv frp_${FRP_VERSION}_linux_amd64 frp
-          cd frp
           
-          # Create FRP config
+          cd frp
           cat > frpc.toml << 'EOFFRP'
           serverAddr = "159.195.6.61"
           serverPort = 7000
           
-          loginFailExit = false
-          
           log.level = "info"
-          log.maxDays = 3
           
           [[proxies]]
-          name = "github-vnc-desktop"
+          name = "kde-plasma-vnc"
           type = "tcp"
           localIP = "127.0.0.1"
           localPort = 5900
           remotePort = 5900
           EOFFRP
           
-          cat frpc.toml
+          echo "✅ FRP configured"
 
       - name: Start FRP Tunnel
         run: |
           cd frp
           
-          echo "Starting FRP tunnel..."
+          echo "🔌 Starting FRP tunnel..."
           nohup ./frpc -c frpc.toml > frpc.log 2>&1 &
-          FRP_PID=$!
-          echo $FRP_PID > frpc.pid
           
-          # Wait for FRP to connect
-          echo "Waiting for FRP connection..."
+          # Wait for connection
           for i in {1..20}; do
             if grep -q "start proxy success|login to server success" frpc.log 2>/dev/null; then
-              echo "✅ FRP connected successfully!"
+              echo "✅ FRP tunnel established!"
               break
             fi
-            echo "Attempt $i/20: Waiting for FRP..."
             sleep 1
           done
           
           echo ""
           echo "=== FRP Status ==="
           ps aux | grep frpc | grep -v grep
-          
-          echo ""
-          echo "=== FRP Logs ==="
           cat frpc.log
 
-      - name: Connection Ready
+      - name: Display Connection Info
         run: |
           echo ""
           echo "╔═══════════════════════════════════════════════════════╗"
-          echo "║            🎉 VNC DESKTOP IS READY! 🎉                ║"
+          echo "║          🎨 KDE PLASMA DESKTOP READY! 🎨             ║"
+          echo "╠═══════════════════════════════════════════════════════╣"
+          echo "║                                                       ║"
+          echo "║  📡 VNC Address: 159.195.6.61:5900                   ║"
+          echo "║  🔑 Password: github2024                              ║"
+          echo "║  🖥️  Resolution: 1920x1080 Full HD                    ║"
+          echo "║  🎨 Desktop: KDE Plasma (Most Beautiful UI)          ║"
+          echo "║  💾 Storage: /mnt/storage                             ║"
+          echo "║                                                       ║"
+          echo "║  Features:                                            ║"
+          echo "║  ✨ Smooth animations & transparency effects          ║"
+          echo "║  🎯 Modern, polished interface                        ║"
+          echo "║  🎭 Highly customizable appearance                    ║"
+          echo "║  🚀 Fast and responsive                               ║"
+          echo "║                                                       ║"
+          echo "║  Apps Included:                                       ║"
+          echo "║  • Konsole (Terminal)                                 ║"
+          echo "║  • Dolphin (File Manager)                             ║"
+          echo "║  • Kate (Text Editor)                                 ║"
+          echo "║  • Firefox (Web Browser)                              ║"
+          echo "║                                                       ║"
           echo "╚═══════════════════════════════════════════════════════╝"
           echo ""
-          echo "📡 Connect to: 159.195.6.61:5900"
-          echo "🔑 Password: github2024"
-          echo "🖥️  Desktop: XFCE4 (1920x1080)"
-          echo "💾 Storage: /mnt/storage"
+          echo "⏰ Session duration: Up to 6 hours"
           echo ""
-          echo "VNC Clients: RealVNC, TigerVNC, TightVNC, Remmina"
-          echo ""
-          echo "⏰ Session active for up to 6 hours"
-          echo "════════════════════════════════════════════════════════"
 
-      - name: Keep Alive & Monitor
+      - name: Keep Alive with Monitoring
         run: |
-          echo ""
-          echo "🟢 SESSION ACTIVE - Monitoring started"
+          echo "🟢 KDE PLASMA SESSION ACTIVE"
           echo ""
           
-          CHECK=0
+          COUNT=0
           while true; do
-            CHECK=$((CHECK + 1))
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "📊 Health Check #${CHECK} - $(date '+%H:%M:%S')"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            COUNT=$((COUNT + 1))
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📊 Status Check #${COUNT} - $(date '+%H:%M:%S')"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             
             # Check VNC
             if pgrep -f "Xtigervnc.*:0" > /dev/null; then
-              VNC_PID=$(pgrep -f "Xtigervnc.*:0")
-              echo "✅ VNC Running (PID: $VNC_PID)"
+              echo "✅ VNC Server: Active"
             else
-              echo "❌ VNC NOT RUNNING - Restarting..."
+              echo "⚠️  VNC Server: Restarting..."
               vncserver :0 -geometry 1920x1080 -depth 24 -localhost no
               sleep 3
             fi
             
             # Check FRP
             if pgrep -f "frpc" > /dev/null; then
-              FRP_PID=$(pgrep -f "frpc")
-              echo "✅ FRP Running (PID: $FRP_PID)"
+              echo "✅ FRP Tunnel: Connected"
             else
-              echo "❌ FRP NOT RUNNING - Restarting..."
+              echo "⚠️  FRP Tunnel: Reconnecting..."
               cd frp && nohup ./frpc -c frpc.toml >> frpc.log 2>&1 &
               sleep 2
             fi
             
-            # Show connections
-            CONN_COUNT=$(sudo netstat -tn 2>/dev/null | grep :5900 | grep ESTABLISHED | wc -l)
-            if [ "$CONN_COUNT" -gt 0 ]; then
-              echo "🌐 Active Connections: $CONN_COUNT"
-              sudo netstat -tn | grep :5900 | grep ESTABLISHED
+            # Check KDE Plasma processes
+            if pgrep -f "plasmashell" > /dev/null; then
+              echo "✅ KDE Plasma: Running"
             else
-              echo "🌐 Active Connections: None"
+              echo "ℹ️  KDE Plasma: Starting (will start on first connection)"
             fi
             
-            # Resources
-            echo "💾 Disk: $(df -h / | tail -1 | awk '{print $5 " used"}')"
-            echo "🧠 RAM: $(free -h | grep Mem | awk '{print $3 "/" $2}')"
+            # Active connections
+            CONNECTIONS=$(sudo netstat -tn 2>/dev/null | grep :5900 | grep ESTABLISHED | wc -l)
+            if [ "$CONNECTIONS" -gt 0 ]; then
+              echo "👥 Active VNC connections: $CONNECTIONS"
+            else
+              echo "👤 Waiting for VNC connections..."
+            fi
             
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            # System resources
+            echo "💾 Disk: $(df -h / | tail -1 | awk '{print $5 " used"}')"
+            echo "🧠 Memory: $(free -h | grep Mem | awk '{print $3 "/" $2}')"
+            
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo ""
             
             sleep 180  # Check every 3 minutes
