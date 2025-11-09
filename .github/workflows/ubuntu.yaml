@@ -83,7 +83,6 @@ jobs:
           EOFLOCK
           
           # Disable power management screen locking
-          mkdir -p ~/.config/powermanagementprofilesrc
           cat > ~/.config/powermanagementprofilesrc << 'EOFPOWER'
           [AC][DPMSControl]
           idleTime=0
@@ -95,7 +94,6 @@ jobs:
           EOFPOWER
           
           # Set KDE to not require password after screensaver
-          mkdir -p ~/.config/ksmserverrc
           cat > ~/.config/ksmserverrc << 'EOFKSM'
           [General]
           loginMode=default
