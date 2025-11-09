@@ -61,6 +61,48 @@ jobs:
           
           echo "✅ KDE Plasma installed successfully!"
 
+      - name: Configure User Password
+        run: |
+          # Set password for runner user to avoid lock screen issues
+          echo "runner:github2024" | sudo chpasswd
+          echo "✅ User password set"
+
+      - name: Disable KDE Lock Screen
+        run: |
+          # Disable screen locking completely
+          mkdir -p ~/.config
+          
+          cat > ~/.config/kscreenlockerrc << 'EOFLOCK'
+          [Daemon]
+          Autolock=false
+          LockOnResume=false
+          Timeout=0
+          
+          [Greeter]
+          WallpaperPlugin=
+          EOFLOCK
+          
+          # Disable power management screen locking
+          mkdir -p ~/.config/powermanagementprofilesrc
+          cat > ~/.config/powermanagementprofilesrc << 'EOFPOWER'
+          [AC][DPMSControl]
+          idleTime=0
+          lockBeforeTurnOff=0
+          
+          [Battery][DPMSControl]
+          idleTime=0
+          lockBeforeTurnOff=0
+          EOFPOWER
+          
+          # Set KDE to not require password after screensaver
+          mkdir -p ~/.config/ksmserverrc
+          cat > ~/.config/ksmserverrc << 'EOFKSM'
+          [General]
+          loginMode=default
+          EOFKSM
+          
+          echo "✅ KDE lock screen disabled"
+
       - name: Install Android Command Line Tools
         run: |
           echo "📱 Installing Android SDK Command Line Tools..."
@@ -127,29 +169,30 @@ jobs:
           
           echo "✅ Android SDK components installed"
 
-      - name: Download Android Studio
+      - name: Download Android Studio (Latest 2025.2.1)
         run: |
-          echo "💿 Downloading Android Studio..."
+          echo "💿 Downloading Android Studio Otter 2025.2.1 (Latest Stable)..."
           
           cd /mnt/storage
           
-          # Download latest Android Studio
-          wget -q https://redirector.gvt1.com/edgedl/android/studio/ide-zips/2024.2.1.11/android-studio-2024.2.1.11-linux.tar.gz -O android-studio.tar.gz
+          # Download latest Android Studio Otter 2025.2.1.7
+          wget -q https://redirector.gvt1.com/edgedl/android/studio/ide-zips/2025.2.1.7/android-studio-2025.2.1.7-linux.tar.gz -O android-studio.tar.gz
           
+          echo "📦 Extracting Android Studio..."
           tar -xzf android-studio.tar.gz
           rm android-studio.tar.gz
           
-          echo "✅ Android Studio downloaded and extracted"
+          echo "✅ Android Studio Otter 2025.2.1.7 downloaded and extracted"
 
       - name: Configure Android Studio
         run: |
           echo "⚙️ Configuring Android Studio..."
           
-          # Create Android Studio config directory
-          mkdir -p ~/.config/Google/AndroidStudio2024.2
+          # Create Android Studio config directory (updated path for 2025.2)
+          mkdir -p ~/.config/Google/AndroidStudio2025.2
           
           # Create idea.properties to set custom paths
-          cat > ~/.config/Google/AndroidStudio2024.2/idea.properties << 'EOFPROPS'
+          cat > ~/.config/Google/AndroidStudio2025.2/idea.properties << 'EOFPROPS'
           # Custom Android SDK location
           android.sdk.path=/mnt/storage/android-sdk
           
@@ -163,10 +206,10 @@ jobs:
           [Desktop Entry]
           Version=1.0
           Type=Application
-          Name=Android Studio
+          Name=Android Studio 2025.2.1
           Icon=/mnt/storage/android-studio/bin/studio.png
           Exec=/mnt/storage/android-studio/bin/studio.sh
-          Comment=Android Development IDE
+          Comment=Android Development IDE (Otter)
           Categories=Development;IDE;
           Terminal=false
           StartupWMClass=jetbrains-studio
@@ -184,7 +227,7 @@ jobs:
           echo "github2024" | vncpasswd -f > ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
           
-          # Create xstartup for KDE Plasma
+          # Create xstartup for KDE Plasma WITHOUT lock screen
           cat > ~/.vnc/xstartup << 'EOFVNC'
           #!/bin/bash
           
@@ -205,11 +248,18 @@ jobs:
               source ~/.profile.d/android.sh
           fi
           
+          # Disable screen locking via environment
+          export KDE_SKIP_KSCREENLOCKER=1
+          
           # Start KDE Plasma
           export XDG_SESSION_TYPE=x11
           export XDG_SESSION_DESKTOP=KDE
           export XDG_CURRENT_DESKTOP=KDE
           export DESKTOP_SESSION=plasma
+          
+          # Disable screen locker before starting plasma
+          kwriteconfig5 --file kscreenlockerrc --group Daemon --key Autolock false
+          kwriteconfig5 --file kscreenlockerrc --group Daemon --key LockOnResume false
           
           # Launch Plasma session
           startplasma-x11
@@ -226,7 +276,7 @@ jobs:
           alwaysshared=true
           EOFCONFIG
           
-          echo "✅ VNC configured for KDE Plasma"
+          echo "✅ VNC configured for KDE Plasma without lock screen"
 
       - name: Start VNC Server
         run: |
@@ -336,18 +386,19 @@ jobs:
           
           echo ""
           echo "╔═══════════════════════════════════════════════════════╗"
-          echo "║    🎨 KDE PLASMA + ANDROID STUDIO READY! 🎨          ║"
+          echo "║  🎨 KDE PLASMA + ANDROID STUDIO 2025.2.1 READY! 🎨   ║"
           echo "╠═══════════════════════════════════════════════════════╣"
           echo "║                                                       ║"
           echo "║  📡 VNC Address: 159.195.6.61:5900                   ║"
           echo "║  🔑 Password: github2024                              ║"
           echo "║  🖥️  Resolution: 1920x1080 Full HD                    ║"
-          echo "║  🎨 Desktop: KDE Plasma                               ║"
+          echo "║  🎨 Desktop: KDE Plasma (No Lock Screen)              ║"
           echo "║                                                       ║"
           echo "║  📱 Android Development:                              ║"
-          echo "║  • Android Studio: /mnt/storage/android-studio       ║"
-          echo "║  • SDK Location: /mnt/storage/android-sdk ($SDK_SIZE)║"
-          echo "║  • AVD Location: /mnt/storage/android-avd ($AVD_SIZE)║"
+          echo "║  • Android Studio: 2025.2.1 Otter (Latest Stable)    ║"
+          echo "║  • Location: /mnt/storage/android-studio             ║"
+          echo "║  • SDK: /mnt/storage/android-sdk ($SDK_SIZE)         ║"
+          echo "║  • AVD: /mnt/storage/android-avd ($AVD_SIZE)         ║"
           echo "║  • Platform: Android 34 (API 34)                     ║"
           echo "║  • Emulator: x86_64 system image installed           ║"
           echo "║  • KVM Acceleration: $KVM_STATUS                     ║"
@@ -364,11 +415,13 @@ jobs:
           echo "╚═══════════════════════════════════════════════════════╝"
           echo ""
           echo "⏰ Session duration: Up to 6 hours"
+          echo "🔓 No lock screen - direct desktop access"
+          echo "🆕 Latest Android Studio Otter 2025.2.1.7"
           echo ""
 
       - name: Keep Alive with Monitoring
         run: |
-          echo "🟢 KDE PLASMA + ANDROID STUDIO SESSION ACTIVE"
+          echo "🟢 KDE PLASMA + ANDROID STUDIO 2025.2.1 SESSION ACTIVE"
           echo ""
           
           COUNT=0
@@ -405,7 +458,7 @@ jobs:
             
             # Check Android Studio
             if pgrep -f "android-studio" > /dev/null; then
-              echo "📱 Android Studio: Running"
+              echo "📱 Android Studio 2025.2.1: Running"
             fi
             
             # Check KVM
