@@ -95,6 +95,10 @@ jobs:
           echo "github2024" | vncpasswd -f > ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
 
+          # Force Xtigervnc to use ~/.vnc/passwd
+          echo 'export Xtigervnc_PASSWD_FILE=~/.vnc/passwd' >> ~/.bashrc
+          export Xtigervnc_PASSWD_FILE=~/.vnc/passwd
+
           cat > ~/.vnc/xstartup << 'EOF'
           #!/bin/bash
           unset SESSION_MANAGER DBUS_SESSION_BUS_ADDRESS
@@ -115,7 +119,8 @@ jobs:
 
       - name: Start VNC
         run: |
-          vncserver :0 -geometry 1920x1080 -depth 24 -localhost no -SecurityTypes VncAuth -passwd ~/.vnc/passwd
+          export Xtigervnc_PASSWD_FILE=~/.vnc/passwd
+          vncserver :0 -geometry 1920x1080 -depth 24 -localhost no
           sleep 5
           pgrep -f "Xtigervnc.*:0" || exit 1
           echo "✅ VNC Started"
@@ -151,8 +156,9 @@ jobs:
 
       - name: Keep Alive
         run: |
+          export Xtigervnc_PASSWD_FILE=~/.vnc/passwd
           while true; do
-            pgrep -f "Xtigervnc.*:0" || vncserver :0 -geometry 1920x1080 -depth 24 -localhost no -SecurityTypes VncAuth -passwd ~/.vnc/passwd
+            pgrep -f "Xtigervnc.*:0" || vncserver :0 -geometry 1920x1080 -depth 24 -localhost no
             pgrep -f "frpc" || (cd frp && nohup ./frpc -c frpc.toml >> frpc.log 2>&1 &)
             echo "✅ $(date '+%H:%M:%S') - Active | RAM: $(free -h | grep Mem | awk '{print $3}')"
             sleep 180
