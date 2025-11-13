@@ -8,7 +8,7 @@ on:
 jobs:
   kde-desktop:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,7 +20,7 @@ jobs:
           mkdir -p /mnt/storage/android-sdk
           mkdir -p /mnt/storage/android-avd
           df -h /mnt
-          
+
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -59,10 +59,10 @@ jobs:
           unzip -q commandlinetools-*.zip
           mkdir -p cmdline-tools/latest
           mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
-          
+
           export ANDROID_HOME=/mnt/storage/android-sdk
           export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
-          
+
           yes | cmdline-tools/latest/bin/sdkmanager --licenses
           cmdline-tools/latest/bin/sdkmanager \
             "platform-tools" "platforms;android-34" "build-tools;34.0.0" \
@@ -90,15 +90,8 @@ jobs:
       - name: Configure VNC
         run: |
           mkdir -p ~/.vnc
-          
-          # Create password using vncpasswd directly
-          echo -e "github2024
-github2024
-n" | vncpasswd
-          
-          # Verify
-          ls -la ~/.vnc/passwd
-          
+          echo -e "github2024\ngithub2024\nn" | vncpasswd
+
           cat > ~/.vnc/xstartup << 'EOF'
           #!/bin/bash
           unset SESSION_MANAGER DBUS_SESSION_BUS_ADDRESS
@@ -109,7 +102,7 @@ n" | vncpasswd
           startplasma-x11
           EOF
           chmod +x ~/.vnc/xstartup
-          
+
           cat > ~/.vnc/config << 'EOF'
           geometry=1920x1080
           depth=24
@@ -119,12 +112,9 @@ n" | vncpasswd
 
       - name: Start VNC
         run: |
-          # Use standard vncserver command - it will use our password now
           vncserver :0 -geometry 1920x1080 -depth 24 -localhost no
-          
           sleep 5
           pgrep -f "Xtigervnc.*:0" || exit 1
-          
           echo "✅ VNC Started"
           sudo netstat -tulpn | grep 5900
 
@@ -132,7 +122,7 @@ n" | vncpasswd
         run: |
           wget -q https://github.com/fatedier/frp/releases/download/v0.60.0/frp_0.60.0_linux_amd64.tar.gz
           tar -xzf frp_*.tar.gz && mv frp_*_linux_amd64 frp
-          
+
           cat > frp/frpc.toml << 'EOF'
           serverAddr = "159.195.6.61"
           serverPort = 7000
@@ -143,7 +133,7 @@ n" | vncpasswd
           localPort = 5900
           remotePort = 5900
           EOF
-          
+
           cd frp && nohup ./frpc -c frpc.toml > frpc.log 2>&1 &
           sleep 3
 
