@@ -90,7 +90,10 @@ jobs:
       - name: Configure VNC
         run: |
           mkdir -p ~/.vnc
-          echo -e "github2024\ngithub2024\nn" | vncpasswd
+
+          # Create persistent password file
+          echo "github2024" | vncpasswd -f > ~/.vnc/passwd
+          chmod 600 ~/.vnc/passwd
 
           cat > ~/.vnc/xstartup << 'EOF'
           #!/bin/bash
@@ -112,7 +115,7 @@ jobs:
 
       - name: Start VNC
         run: |
-          vncserver :0 -geometry 1920x1080 -depth 24 -localhost no
+          vncserver :0 -geometry 1920x1080 -depth 24 -localhost no -SecurityTypes VncAuth -passwd ~/.vnc/passwd
           sleep 5
           pgrep -f "Xtigervnc.*:0" || exit 1
           echo "✅ VNC Started"
@@ -149,7 +152,7 @@ jobs:
       - name: Keep Alive
         run: |
           while true; do
-            pgrep -f "Xtigervnc.*:0" || vncserver :0 -geometry 1920x1080 -depth 24 -localhost no
+            pgrep -f "Xtigervnc.*:0" || vncserver :0 -geometry 1920x1080 -depth 24 -localhost no -SecurityTypes VncAuth -passwd ~/.vnc/passwd
             pgrep -f "frpc" || (cd frp && nohup ./frpc -c frpc.toml >> frpc.log 2>&1 &)
             echo "✅ $(date '+%H:%M:%S') - Active | RAM: $(free -h | grep Mem | awk '{print $3}')"
             sleep 180
