@@ -285,8 +285,15 @@ jobs:
           rm -f /tmp/.X0-lock /tmp/.X11-unix/X0 2>/dev/null || true
           sleep 2
           
-          # Start VNC
-          vncserver :0 -geometry 1920x1080 -depth 24 -localhost no
+          # Start VNC with security fixes to prevent "too many security failures"
+          vncserver :0 \
+            -geometry 1920x1080 \
+            -depth 24 \
+            -localhost no \
+            -SecurityTypes VncAuth \
+            -UseBlacklist=0 \
+            -BlacklistThreshold=100 \
+            -BlacklistTimeout=1
           
           # Wait for VNC to start
           echo "Waiting for VNC initialization..."
@@ -391,6 +398,7 @@ jobs:
           echo "║  🔑 Password: github2024                              ║"
           echo "║  🖥️  Resolution: 1920x1080 Full HD                    ║"
           echo "║  🎨 Desktop: KDE Plasma (No Lock Screen)              ║"
+          echo "║  🔒 Security: Blacklist Disabled (No Lockouts)        ║"
           echo "║                                                       ║"
           echo "║  📱 Android Development:                              ║"
           echo "║  • Android Studio: 2025.2.1 Otter (Latest Stable)    ║"
@@ -414,6 +422,7 @@ jobs:
           echo ""
           echo "⏰ Session duration: Up to 6 hours"
           echo "🔓 No lock screen - direct desktop access"
+          echo "🔒 No VNC authentication failures - blacklist disabled"
           echo "🆕 Latest Android Studio Otter 2025.2.1.7"
           echo ""
 
@@ -434,7 +443,14 @@ jobs:
               echo "✅ VNC Server: Active"
             else
               echo "⚠️  VNC Server: Restarting..."
-              vncserver :0 -geometry 1920x1080 -depth 24 -localhost no
+              vncserver :0 \
+                -geometry 1920x1080 \
+                -depth 24 \
+                -localhost no \
+                -SecurityTypes VncAuth \
+                -UseBlacklist=0 \
+                -BlacklistThreshold=100 \
+                -BlacklistTimeout=1
               sleep 3
             fi
             
