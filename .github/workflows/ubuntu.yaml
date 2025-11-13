@@ -167,36 +167,121 @@ jobs:
           
           echo "✅ Android SDK components installed"
 
-      - name: Download Android Studio (Latest 2025.2.1)
+      - name: Download Android Studio (Latest Stable)
         run: |
-          echo "💿 Downloading Android Studio Otter 2025.2.1 (Latest Stable)..."
+          echo "💿 Downloading Android Studio (Latest Stable Version)..."
           
           cd /mnt/storage
           
-          # Download latest Android Studio Otter 2025.2.1.7
-          wget -q https://redirector.gvt1.com/edgedl/android/studio/ide-zips/2025.2.1.7/android-studio-2025.2.1.7-linux.tar.gz -O android-studio.tar.gz
+          # Try multiple download URLs with fallback
+          DOWNLOADED=false
           
-          echo "📦 Extracting Android Studio..."
+          # List of Android Studio versions to try (newest to older stable)
+          declare -a VERSIONS=(
+            "2024.2.1.12"
+            "2024.1.2.12"
+            "2024.1.1.12"
+          )
+          
+          for VERSION in "${VERSIONS[@]}"; do
+            echo "Attempting to download Android Studio version: $VERSION"
+            
+            # Try direct Google download
+            if wget --timeout=120 --tries=2 --continue \
+              "https://dl.google.com/android/studio/ide-zips/${VERSION}/android-studio-${VERSION}-linux.tar.gz" \
+              -O android-studio.tar.gz 2>/dev/null; then
+              
+              # Verify download
+              if [ -f android-studio.tar.gz ]; then
+                FILE_SIZE=$(stat -c%s android-studio.tar.gz 2>/dev/null || echo 0)
+                if [ "$FILE_SIZE" -gt 500000000 ]; then
+                  echo "✅ Successfully downloaded Android Studio $VERSION (Size: $(du -h android-studio.tar.gz | cut -f1))"
+                  DOWNLOADED=true
+                  STUDIO_VERSION=$VERSION
+                  break
+                else
+                  echo "⚠️  Downloaded file too small, trying next version..."
+                  rm -f android-studio.tar.gz
+                fi
+              fi
+            fi
+            
+            # Try redirector URL as fallback
+            if [ "$DOWNLOADED" = false ]; then
+              echo "Trying alternative download source..."
+              if wget --timeout=120 --tries=2 --continue \
+                "https://redirector.gvt1.com/edgedl/android/studio/ide-zips/${VERSION}/android-studio-${VERSION}-linux.tar.gz" \
+                -O android-studio.tar.gz 2>/dev/null; then
+                
+                if [ -f android-studio.tar.gz ]; then
+                  FILE_SIZE=$(stat -c%s android-studio.tar.gz 2>/dev/null || echo 0)
+                  if [ "$FILE_SIZE" -gt 500000000 ]; then
+                    echo "✅ Successfully downloaded Android Studio $VERSION"
+                    DOWNLOADED=true
+                    STUDIO_VERSION=$VERSION
+                    break
+                  else
+                    rm -f android-studio.tar.gz
+                  fi
+                fi
+              fi
+            fi
+            
+            echo "Version $VERSION not available, trying next..."
+            sleep 2
+          done
+          
+          if [ "$DOWNLOADED" = false ]; then
+            echo "❌ Failed to download Android Studio from all sources"
+            echo "ℹ️  Android Studio will need to be downloaded manually"
+            echo "ℹ️  You can download it in VNC session with:"
+            echo "    cd /mnt/storage && wget https://dl.google.com/android/studio/ide-zips/2024.2.1.12/android-studio-2024.2.1.12-linux.tar.gz"
+            mkdir -p /mnt/storage/android-studio
+            touch /mnt/storage/ANDROID_STUDIO_DOWNLOAD_FAILED.txt
+            exit 0  # Don't fail the entire workflow
+          fi
+          
+          echo "📦 Extracting Android Studio (this may take 2-3 minutes)..."
           tar -xzf android-studio.tar.gz
+          
+          if [ ! -d "android-studio" ]; then
+            echo "❌ Extraction failed!"
+            exit 1
+          fi
+          
           rm android-studio.tar.gz
           
-          echo "✅ Android Studio Otter 2025.2.1.7 downloaded and extracted"
+          echo "✅ Android Studio $STUDIO_VERSION extracted successfully!"
+          ls -lh /mnt/storage/android-studio/bin/studio.sh
 
       - name: Configure Android Studio
         run: |
           echo "⚙️ Configuring Android Studio..."
           
-          # Create Android Studio config directory (updated path for 2025.2)
-          mkdir -p ~/.config/Google/AndroidStudio2025.2
+          # Check if Android Studio was downloaded
+          if [ ! -d "/mnt/storage/android-studio/bin" ]; then
+            echo "⚠️  Android Studio not found, skipping configuration"
+            exit 0
+          fi
           
-          # Create idea.properties to set custom paths
-          cat > ~/.config/Google/AndroidStudio2025.2/idea.properties << 'EOFPROPS'
-          # Custom Android SDK location
-          android.sdk.path=/mnt/storage/android-sdk
+          # Create Android Studio config directory (generic path that works for all versions)
+          mkdir -p ~/.config/Google
           
-          # Custom AVD location
-          avd.home=/mnt/storage/android-avd
-          EOFPROPS
+          # Try to detect the actual version directory
+          AS_CONFIG_DIR=$(ls -d ~/.config/Google/AndroidStudio* 2>/dev/null | head -1)
+          if [ -z "$AS_CONFIG_DIR" ]; then
+            # Create for common versions
+            for VER in 2024.2 2024.1 2025.1; do
+              mkdir -p ~/.config/Google/AndroidStudio${VER}
+              cat > ~/.config/Google/AndroidStudio${VER}/idea.properties << 'EOFPROPS'
+# Custom Android SDK location
+android.sdk.path=/mnt/storage/android-sdk
+
+# Custom AVD location
+avd.home=/mnt/storage/android-avd
+EOFPROPS
+            done
+          fi
           
           # Create desktop launcher
           mkdir -p ~/.local/share/applications
@@ -204,10 +289,10 @@ jobs:
           [Desktop Entry]
           Version=1.0
           Type=Application
-          Name=Android Studio 2025.2.1
+          Name=Android Studio
           Icon=/mnt/storage/android-studio/bin/studio.png
           Exec=/mnt/storage/android-studio/bin/studio.sh
-          Comment=Android Development IDE (Otter)
+          Comment=Android Development IDE
           Categories=Development;IDE;
           Terminal=false
           StartupWMClass=jetbrains-studio
@@ -402,9 +487,17 @@ jobs:
             KVM_STATUS="⚠️ Not available"
           fi
           
+          # Check if Android Studio was installed
+          AS_STATUS="✅ Installed"
+          AS_VERSION="Latest Stable"
+          if [ ! -f /mnt/storage/android-studio/bin/studio.sh ]; then
+            AS_STATUS="⚠️ Download failed - install manually"
+            AS_VERSION="N/A"
+          fi
+          
           echo ""
           echo "╔═══════════════════════════════════════════════════════╗"
-          echo "║  🎨 KDE PLASMA + ANDROID STUDIO 2025.2.1 READY! 🎨   ║"
+          echo "║  🎨 KDE PLASMA + ANDROID STUDIO READY! 🎨            ║"
           echo "╠═══════════════════════════════════════════════════════╣"
           echo "║                                                       ║"
           echo "║  📡 VNC Address: 159.195.6.61:5900                   ║"
@@ -414,7 +507,8 @@ jobs:
           echo "║  🔒 Security: Blacklist Disabled (No Lockouts)        ║"
           echo "║                                                       ║"
           echo "║  📱 Android Development:                              ║"
-          echo "║  • Android Studio: 2025.2.1 Otter (Latest Stable)    ║"
+          echo "║  • Android Studio: $AS_STATUS                         ║"
+          echo "║  • Version: $AS_VERSION                               ║"
           echo "║  • Location: /mnt/storage/android-studio             ║"
           echo "║  • SDK: /mnt/storage/android-sdk ($SDK_SIZE)         ║"
           echo "║  • AVD: /mnt/storage/android-avd ($AVD_SIZE)         ║"
@@ -436,12 +530,12 @@ jobs:
           echo "⏰ Session duration: Up to 6 hours"
           echo "🔓 No lock screen - direct desktop access"
           echo "🔒 No VNC authentication failures - blacklist disabled"
-          echo "🆕 Latest Android Studio Otter 2025.2.1.7"
+          echo "✅ Password: github2024"
           echo ""
 
       - name: Keep Alive with Monitoring
         run: |
-          echo "🟢 KDE PLASMA + ANDROID STUDIO 2025.2.1 SESSION ACTIVE"
+          echo "🟢 KDE PLASMA + ANDROID STUDIO SESSION ACTIVE"
           echo ""
           
           COUNT=0
@@ -486,7 +580,7 @@ jobs:
             
             # Check Android Studio
             if pgrep -f "android-studio" > /dev/null; then
-              echo "📱 Android Studio 2025.2.1: Running"
+              echo "📱 Android Studio: Running"
             fi
             
             # Check KVM
