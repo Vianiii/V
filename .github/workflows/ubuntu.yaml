@@ -38,10 +38,12 @@ jobs:
         run: |
           echo "runner:github2024" | sudo chpasswd
           mkdir -p ~/.config
-          echo -e "[Daemon]
-Autolock=false
-LockOnResume=false
-Timeout=0" > ~/.config/kscreenlockerrc
+          cat > ~/.config/kscreenlockerrc << 'EOF'
+          [Daemon]
+          Autolock=false
+          LockOnResume=false
+          Timeout=0
+          EOF
 
       - name: Install Android SDK
         run: |
@@ -70,8 +72,10 @@ Timeout=0" > ~/.config/kscreenlockerrc
         run: |
           mkdir -p ~/.config/Google/AndroidStudio{2024.1,2024.2,2025.1}
           for dir in ~/.config/Google/AndroidStudio*; do
-            echo -e "android.sdk.path=/mnt/storage/android-sdk
-avd.home=/mnt/storage/android-avd" > "$dir/idea.properties"
+            cat > "$dir/idea.properties" << 'EOF'
+          android.sdk.path=/mnt/storage/android-sdk
+          avd.home=/mnt/storage/android-avd
+          EOF
           done
 
       - name: Setup Environment
@@ -100,10 +104,12 @@ avd.home=/mnt/storage/android-avd" > "$dir/idea.properties"
           EOF
           chmod +x ~/.vnc/xstartup
           
-          echo -e "geometry=1920x1080
-depth=24
-localhost=no
-alwaysshared=true" > ~/.vnc/config
+          cat > ~/.vnc/config << 'EOF'
+          geometry=1920x1080
+          depth=24
+          localhost=no
+          alwaysshared=true
+          EOF
 
       - name: Start VNC
         run: |
