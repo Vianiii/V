@@ -17,11 +17,8 @@ jobs:
         run: |
           sudo mkdir -p /mnt/storage
           sudo chmod 777 /mnt/storage
-          
-          # Create Android SDK and AVD directories in /mnt
           mkdir -p /mnt/storage/android-sdk
           mkdir -p /mnt/storage/android-avd
-          
           df -h /mnt
           
       - name: Enable KVM
@@ -35,43 +32,23 @@ jobs:
       - name: Install KDE Plasma Desktop
         run: |
           echo "Installing KDE Plasma - Most Beautiful Linux Desktop 🎨"
-          
           sudo apt-get update
-          
-          # Install KDE Plasma Desktop with essential apps
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            kde-plasma-desktop \
-            plasma-nm \
-            plasma-workspace-wayland \
-            konsole \
-            dolphin \
-            kate \
-            firefox \
-            tigervnc-standalone-server \
-            tigervnc-common \
-            dbus-x11 \
-            fonts-noto-color-emoji \
-            wget \
-            curl \
-            net-tools \
-            htop \
-            openjdk-17-jdk \
-            unzip \
-            cpu-checker
-          
+            kde-plasma-desktop plasma-nm plasma-workspace-wayland \
+            konsole dolphin kate firefox \
+            tigervnc-standalone-server tigervnc-common dbus-x11 \
+            fonts-noto-color-emoji wget curl net-tools htop \
+            openjdk-17-jdk unzip cpu-checker
           echo "✅ KDE Plasma installed successfully!"
 
       - name: Configure User Password
         run: |
-          # Set password for runner user to avoid lock screen issues
           echo "runner:github2024" | sudo chpasswd
           echo "✅ User password set"
 
       - name: Disable KDE Lock Screen
         run: |
-          # Disable screen locking completely
           mkdir -p ~/.config
-          
           cat > ~/.config/kscreenlockerrc << 'EOFLOCK'
           [Daemon]
           Autolock=false
@@ -82,7 +59,6 @@ jobs:
           WallpaperPlugin=
           EOFLOCK
           
-          # Disable power management screen locking
           cat > ~/.config/powermanagementprofilesrc << 'EOFPOWER'
           [AC][DPMSControl]
           idleTime=0
@@ -93,7 +69,6 @@ jobs:
           lockBeforeTurnOff=0
           EOFPOWER
           
-          # Set KDE to not require password after screensaver
           cat > ~/.config/ksmserverrc << 'EOFKSM'
           [General]
           loginMode=default
@@ -104,23 +79,16 @@ jobs:
       - name: Install Android Command Line Tools
         run: |
           echo "📱 Installing Android SDK Command Line Tools..."
-          
           cd /mnt/storage/android-sdk
-          
-          # Download latest command line tools
           wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdtools.zip
           unzip -q cmdtools.zip
           rm cmdtools.zip
-          
-          # Organize cmdline-tools structure (required by Android)
           mkdir -p cmdline-tools/latest
           mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
-          
           echo "✅ Android Command Line Tools installed"
 
       - name: Set Android Environment Variables
         run: |
-          # Set environment variables for this session
           echo "ANDROID_HOME=/mnt/storage/android-sdk" >> $GITHUB_ENV
           echo "ANDROID_SDK_ROOT=/mnt/storage/android-sdk" >> $GITHUB_ENV
           echo "ANDROID_AVD_HOME=/mnt/storage/android-avd" >> $GITHUB_ENV
@@ -128,7 +96,6 @@ jobs:
           echo "/mnt/storage/android-sdk/platform-tools" >> $GITHUB_PATH
           echo "/mnt/storage/android-sdk/emulator" >> $GITHUB_PATH
           
-          # Also create persistent config for VNC session
           mkdir -p ~/.profile.d
           cat > ~/.profile.d/android.sh << 'EOFENV'
           export ANDROID_HOME=/mnt/storage/android-sdk
@@ -140,9 +107,7 @@ jobs:
           export PATH=$PATH:/mnt/storage/android-sdk/build-tools/34.0.0
           EOFENV
           
-          # Source it
           source ~/.profile.d/android.sh
-          
           echo "✅ Android environment variables configured"
 
       - name: Install Android SDK Components
@@ -150,15 +115,9 @@ jobs:
           export ANDROID_HOME=/mnt/storage/android-sdk
           export ANDROID_SDK_ROOT=/mnt/storage/android-sdk
           export PATH=$PATH:/mnt/storage/android-sdk/cmdline-tools/latest/bin
-          
           cd /mnt/storage/android-sdk
-          
           echo "📦 Installing Android SDK components..."
-          
-          # Accept licenses
           yes | cmdline-tools/latest/bin/sdkmanager --licenses
-          
-          # Install essential SDK components
           cmdline-tools/latest/bin/sdkmanager \
             "platform-tools" \
             "platforms;android-34" \
@@ -166,19 +125,14 @@ jobs:
             "build-tools;34.0.0" \
             "emulator" \
             "system-images;android-34;google_apis;x86_64"
-          
           echo "✅ Android SDK components installed"
 
-      - name: Download Android Studio (Latest Stable)
+      - name: Download Android Studio
         run: |
-          echo "💿 Downloading Android Studio (Latest Stable Version)..."
-          
+          echo "💿 Downloading Android Studio..."
           cd /mnt/storage
-          
-          # Try multiple download URLs with fallback
           DOWNLOADED=false
           
-          # List of Android Studio versions to try (newest to older stable)
           declare -a VERSIONS=(
             "2024.2.1.12"
             "2024.1.2.12"
@@ -186,31 +140,25 @@ jobs:
           )
           
           for VERSION in "${VERSIONS[@]}"; do
-            echo "Attempting to download Android Studio version: $VERSION"
-            
-            # Try direct Google download
+            echo "Trying Android Studio $VERSION..."
             if wget --timeout=120 --tries=2 --continue \
               "https://dl.google.com/android/studio/ide-zips/${VERSION}/android-studio-${VERSION}-linux.tar.gz" \
               -O android-studio.tar.gz 2>/dev/null; then
               
-              # Verify download
               if [ -f android-studio.tar.gz ]; then
                 FILE_SIZE=$(stat -c%s android-studio.tar.gz 2>/dev/null || echo 0)
                 if [ "$FILE_SIZE" -gt 500000000 ]; then
-                  echo "✅ Successfully downloaded Android Studio $VERSION (Size: $(du -h android-studio.tar.gz | cut -f1))"
+                  echo "✅ Downloaded Android Studio $VERSION"
                   DOWNLOADED=true
                   STUDIO_VERSION=$VERSION
                   break
                 else
-                  echo "⚠️  Downloaded file too small, trying next version..."
                   rm -f android-studio.tar.gz
                 fi
               fi
             fi
             
-            # Try redirector URL as fallback
             if [ "$DOWNLOADED" = false ]; then
-              echo "Trying alternative download source..."
               if wget --timeout=120 --tries=2 --continue \
                 "https://redirector.gvt1.com/edgedl/android/studio/ide-zips/${VERSION}/android-studio-${VERSION}-linux.tar.gz" \
                 -O android-studio.tar.gz 2>/dev/null; then
@@ -218,7 +166,7 @@ jobs:
                 if [ -f android-studio.tar.gz ]; then
                   FILE_SIZE=$(stat -c%s android-studio.tar.gz 2>/dev/null || echo 0)
                   if [ "$FILE_SIZE" -gt 500000000 ]; then
-                    echo "✅ Successfully downloaded Android Studio $VERSION"
+                    echo "✅ Downloaded Android Studio $VERSION"
                     DOWNLOADED=true
                     STUDIO_VERSION=$VERSION
                     break
@@ -229,63 +177,37 @@ jobs:
               fi
             fi
             
-            echo "Version $VERSION not available, trying next..."
             sleep 2
           done
           
           if [ "$DOWNLOADED" = false ]; then
-            echo "❌ Failed to download Android Studio from all sources"
-            echo "ℹ️  Android Studio will need to be downloaded manually"
-            echo "ℹ️  You can download it in VNC session with:"
-            echo "    cd /mnt/storage && wget https://dl.google.com/android/studio/ide-zips/2024.2.1.12/android-studio-2024.2.1.12-linux.tar.gz"
+            echo "⚠️ Android Studio download failed - will skip"
             mkdir -p /mnt/storage/android-studio
-            touch /mnt/storage/ANDROID_STUDIO_DOWNLOAD_FAILED.txt
             exit 0
           fi
           
-          echo "📦 Extracting Android Studio (this may take 2-3 minutes)..."
+          echo "📦 Extracting Android Studio..."
           tar -xzf android-studio.tar.gz
-          
-          if [ ! -d "android-studio" ]; then
-            echo "❌ Extraction failed!"
-            exit 1
-          fi
-          
           rm android-studio.tar.gz
-          
-          echo "✅ Android Studio $STUDIO_VERSION extracted successfully!"
-          ls -lh /mnt/storage/android-studio/bin/studio.sh
+          echo "✅ Android Studio $STUDIO_VERSION ready!"
 
       - name: Configure Android Studio
         run: |
           echo "⚙️ Configuring Android Studio..."
-          
-          # Check if Android Studio was downloaded
           if [ ! -d "/mnt/storage/android-studio/bin" ]; then
-            echo "⚠️  Android Studio not found, skipping configuration"
+            echo "⚠️ Android Studio not found, skipping"
             exit 0
           fi
           
-          # Create Android Studio config directory (generic path that works for all versions)
           mkdir -p ~/.config/Google
-          
-          # Try to detect the actual version directory
-          AS_CONFIG_DIR=$(ls -d ~/.config/Google/AndroidStudio* 2>/dev/null | head -1)
-          if [ -z "$AS_CONFIG_DIR" ]; then
-            # Create for common versions
-            for VER in 2024.2 2024.1 2025.1; do
-              mkdir -p ~/.config/Google/AndroidStudio${VER}
-              cat > ~/.config/Google/AndroidStudio${VER}/idea.properties << 'EOFPROPS'
-          # Custom Android SDK location
+          for VER in 2024.2 2024.1 2025.1; do
+            mkdir -p ~/.config/Google/AndroidStudio${VER}
+            cat > ~/.config/Google/AndroidStudio${VER}/idea.properties << 'EOFPROPS'
           android.sdk.path=/mnt/storage/android-sdk
-          
-          # Custom AVD location
           avd.home=/mnt/storage/android-avd
           EOFPROPS
-            done
-          fi
+          done
           
-          # Create desktop launcher
           mkdir -p ~/.local/share/applications
           cat > ~/.local/share/applications/android-studio.desktop << 'EOFDESKTOP'
           [Desktop Entry]
@@ -301,65 +223,49 @@ jobs:
           EOFDESKTOP
           
           chmod +x ~/.local/share/applications/android-studio.desktop
-          
           echo "✅ Android Studio configured"
 
       - name: Configure VNC for KDE Plasma
         run: |
           mkdir -p ~/.vnc
-          
-          # VNC password - create the password file with github2024
           echo "github2024" | vncpasswd -f > ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
           
-          # Verify password file was created
           if [ ! -f ~/.vnc/passwd ]; then
             echo "❌ ERROR: Password file not created!"
             exit 1
           fi
           echo "✅ Password file created: $(ls -lh ~/.vnc/passwd)"
           
-          # Create xstartup for KDE Plasma WITHOUT lock screen
           cat > ~/.vnc/xstartup << 'EOFVNC'
           #!/bin/bash
-          
-          # Unset session managers
           unset SESSION_MANAGER
           unset DBUS_SESSION_BUS_ADDRESS
           
-          # Start D-Bus
           if [ -z "$DBUS_SESSION_BUS_ADDRESS" ]; then
               eval $(dbus-launch --sh-syntax --exit-with-session)
           fi
           
-          # Set background
           xsetroot -solid "#1e1e2e"
           
-          # Load Android environment variables
           if [ -f ~/.profile.d/android.sh ]; then
               source ~/.profile.d/android.sh
           fi
           
-          # Disable screen locking via environment
           export KDE_SKIP_KSCREENLOCKER=1
-          
-          # Start KDE Plasma
           export XDG_SESSION_TYPE=x11
           export XDG_SESSION_DESKTOP=KDE
           export XDG_CURRENT_DESKTOP=KDE
           export DESKTOP_SESSION=plasma
           
-          # Disable screen locker before starting plasma
           kwriteconfig5 --file kscreenlockerrc --group Daemon --key Autolock false
           kwriteconfig5 --file kscreenlockerrc --group Daemon --key LockOnResume false
           
-          # Launch Plasma session
           startplasma-x11
           EOFVNC
           
           chmod +x ~/.vnc/xstartup
           
-          # VNC config for best quality
           cat > ~/.vnc/config << 'EOFCONFIG'
           geometry=1920x1080
           dpi=96
@@ -368,29 +274,31 @@ jobs:
           alwaysshared=true
           EOFCONFIG
           
-          echo "✅ VNC configured for KDE Plasma without lock screen"
+          echo "✅ VNC configured"
 
       - name: Start VNC Server
         run: |
           echo "🚀 Starting VNC server with KDE Plasma..."
           
-          # Clean up any existing sessions
-          vncserver -kill :0 2>/dev/null || true
+          pkill -9 Xtigervnc 2>/dev/null || true
           rm -f /tmp/.X0-lock /tmp/.X11-unix/X0 2>/dev/null || true
           sleep 2
           
-          # Start VNC with explicit password file and security settings
-          vncserver :0 \
+          # Start Xtigervnc DIRECTLY to use our password file
+          /usr/bin/Xtigervnc :0 \
             -geometry 1920x1080 \
             -depth 24 \
-            -localhost no \
+            -rfbport 5900 \
             -rfbauth ~/.vnc/passwd \
             -SecurityTypes VncAuth \
             -UseBlacklist=0 \
             -BlacklistThreshold=100 \
-            -BlacklistTimeout=1
+            -BlacklistTimeout=1 \
+            -localhost=0 \
+            -AlwaysShared=1 \
+            -desktop "KDE Plasma (github2024)" \
+            -xstartup ~/.vnc/xstartup &
           
-          # Wait for VNC to start
           echo "Waiting for VNC initialization..."
           for i in {1..30}; do
             if pgrep -f "Xtigervnc.*:0" > /dev/null; then
@@ -400,34 +308,24 @@ jobs:
             sleep 1
           done
           
-          # Verify password file is being used (should show ~/.vnc/passwd, not /tmp/)
           echo ""
           echo "=== VNC Process (verifying password file) ==="
-          ps aux | grep Xtigervnc | grep -v grep | grep -o "PasswordFile [^ ]*"
+          ps aux | grep Xtigervnc | grep -v grep | grep -o "rfbauth [^ ]*"
           
-          # Display status
           echo ""
           echo "=== VNC Status ==="
-          pgrep -a "Xtigervnc" || echo "⚠️  VNC process not found"
-          sudo netstat -tulpn | grep 5900 || echo "⚠️  Port 5900 not listening"
-          
-          # Show logs if available
-          if [ -f ~/.vnc/*.log ]; then
-            echo ""
-            echo "=== VNC Logs ==="
-            tail -20 ~/.vnc/*:0.log
-          fi
+          pgrep -a "Xtigervnc" || echo "⚠️ VNC process not found"
+          sudo netstat -tulpn | grep 5900 || echo "⚠️ Port 5900 not listening"
 
       - name: Verify VNC Running
         run: |
           if ! pgrep -f "Xtigervnc.*:0" > /dev/null; then
             echo "❌ VNC server failed to start!"
-            cat ~/.vnc/*:0.log 2>/dev/null || echo "No logs available"
             exit 1
           fi
-          echo "✅ VNC is running"
+          echo "✅ VNC is running with password: github2024"
 
-      - name: Download and Setup FRP
+      - name: Setup FRP Tunnel
         run: |
           echo "📡 Setting up FRP tunnel..."
           FRP_VERSION="0.60.0"
@@ -455,11 +353,9 @@ jobs:
       - name: Start FRP Tunnel
         run: |
           cd frp
-          
           echo "🔌 Starting FRP tunnel..."
           nohup ./frpc -c frpc.toml > frpc.log 2>&1 &
           
-          # Wait for connection
           for i in {1..20}; do
             if grep -q "start proxy success|login to server success" frpc.log 2>/dev/null; then
               echo "✅ FRP tunnel established!"
@@ -475,26 +371,17 @@ jobs:
 
       - name: Display Connection Info
         run: |
-          export ANDROID_HOME=/mnt/storage/android-sdk
-          
-          # Get disk usage
           SDK_SIZE=$(du -sh /mnt/storage/android-sdk 2>/dev/null | cut -f1)
           AVD_SIZE=$(du -sh /mnt/storage/android-avd 2>/dev/null | cut -f1)
           
-          # Check KVM status
-          KVM_STATUS="Disabled"
+          KVM_STATUS="⚠️ Not available"
           if [ -e /dev/kvm ]; then
-            KVM_STATUS="✅ Enabled (/dev/kvm)"
-          else
-            KVM_STATUS="⚠️ Not available"
+            KVM_STATUS="✅ Enabled"
           fi
           
-          # Check if Android Studio was installed
           AS_STATUS="✅ Installed"
-          AS_VERSION="Latest Stable"
           if [ ! -f /mnt/storage/android-studio/bin/studio.sh ]; then
-            AS_STATUS="⚠️ Download failed - install manually"
-            AS_VERSION="N/A"
+            AS_STATUS="⚠️ Not installed"
           fi
           
           echo ""
@@ -506,16 +393,14 @@ jobs:
           echo "║  🔑 Password: github2024                              ║"
           echo "║  🖥️  Resolution: 1920x1080 Full HD                    ║"
           echo "║  🎨 Desktop: KDE Plasma (No Lock Screen)              ║"
-          echo "║  🔒 Security: Blacklist Disabled (No Lockouts)        ║"
+          echo "║  🔒 Security: Blacklist Disabled                      ║"
           echo "║                                                       ║"
           echo "║  📱 Android Development:                              ║"
           echo "║  • Android Studio: $AS_STATUS                         ║"
-          echo "║  • Version: $AS_VERSION                               ║"
-          echo "║  • Location: /mnt/storage/android-studio             ║"
           echo "║  • SDK: /mnt/storage/android-sdk ($SDK_SIZE)         ║"
           echo "║  • AVD: /mnt/storage/android-avd ($AVD_SIZE)         ║"
           echo "║  • Platform: Android 34 (API 34)                     ║"
-          echo "║  • Emulator: x86_64 system image installed           ║"
+          echo "║  • Emulator: x86_64 with Google APIs                 ║"
           echo "║  • KVM Acceleration: $KVM_STATUS                     ║"
           echo "║                                                       ║"
           echo "║  🚀 Launch Android Studio:                            ║"
@@ -529,9 +414,7 @@ jobs:
           echo "║                                                       ║"
           echo "╚═══════════════════════════════════════════════════════╝"
           echo ""
-          echo "⏰ Session duration: Up to 6 hours"
-          echo "🔓 No lock screen - direct desktop access"
-          echo "🔒 No VNC authentication failures - blacklist disabled"
+          echo "⏰ Session: Up to 6 hours"
           echo "✅ Password: github2024"
           echo ""
 
@@ -547,24 +430,26 @@ jobs:
             echo "📊 Status Check #${COUNT} - $(date '+%H:%M:%S')"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             
-            # Check VNC
             if pgrep -f "Xtigervnc.*:0" > /dev/null; then
               echo "✅ VNC Server: Active"
             else
               echo "⚠️  VNC Server: Restarting..."
-              vncserver :0 \
+              /usr/bin/Xtigervnc :0 \
                 -geometry 1920x1080 \
                 -depth 24 \
-                -localhost no \
+                -rfbport 5900 \
                 -rfbauth ~/.vnc/passwd \
                 -SecurityTypes VncAuth \
                 -UseBlacklist=0 \
                 -BlacklistThreshold=100 \
-                -BlacklistTimeout=1
+                -BlacklistTimeout=1 \
+                -localhost=0 \
+                -AlwaysShared=1 \
+                -desktop "KDE Plasma" \
+                -xstartup ~/.vnc/xstartup &
               sleep 3
             fi
             
-            # Check FRP
             if pgrep -f "frpc" > /dev/null; then
               echo "✅ FRP Tunnel: Connected"
             else
@@ -573,38 +458,33 @@ jobs:
               sleep 2
             fi
             
-            # Check KDE Plasma processes
             if pgrep -f "plasmashell" > /dev/null; then
               echo "✅ KDE Plasma: Running"
             else
-              echo "ℹ️  KDE Plasma: Starting (will start on first connection)"
+              echo "ℹ️  KDE Plasma: Will start on first connection"
             fi
             
-            # Check Android Studio
             if pgrep -f "android-studio" > /dev/null; then
               echo "📱 Android Studio: Running"
             fi
             
-            # Check KVM
             if [ -e /dev/kvm ]; then
-              echo "⚡ KVM: Available for emulator acceleration"
+              echo "⚡ KVM: Available"
             fi
             
-            # Active connections
             CONNECTIONS=$(sudo netstat -tn 2>/dev/null | grep :5900 | grep ESTABLISHED | wc -l)
             if [ "$CONNECTIONS" -gt 0 ]; then
               echo "👥 Active VNC connections: $CONNECTIONS"
             else
-              echo "👤 Waiting for VNC connections..."
+              echo "👤 Waiting for connections..."
             fi
             
-            # System resources
-            echo "💾 Root: $(df -h / | tail -1 | awk '{print $5 " used"}')"
-            echo "💾 /mnt: $(df -h /mnt | tail -1 | awk '{print $5 " used (" $4 " free)"}')"
-            echo "🧠 Memory: $(free -h | grep Mem | awk '{print $3 "/" $2}')"
+            echo "💾 Root: $(df -h / | tail -1 | awk '{print $5}')"
+            echo "💾 /mnt: $(df -h /mnt | tail -1 | awk '{print $5 " (" $4 " free)"}')"
+            echo "🧠 RAM: $(free -h | grep Mem | awk '{print $3 "/" $2}')"
             
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo ""
             
-            sleep 180  # Check every 3 minutes
+            sleep 180
           done
