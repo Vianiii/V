@@ -221,9 +221,16 @@ jobs:
         run: |
           mkdir -p ~/.vnc
           
-          # VNC password
+          # VNC password - create the password file with github2024
           echo "github2024" | vncpasswd -f > ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
+          
+          # Verify password file was created
+          if [ ! -f ~/.vnc/passwd ]; then
+            echo "❌ ERROR: Password file not created!"
+            exit 1
+          fi
+          echo "✅ Password file created: $(ls -lh ~/.vnc/passwd)"
           
           # Create xstartup for KDE Plasma WITHOUT lock screen
           cat > ~/.vnc/xstartup << 'EOFVNC'
@@ -285,11 +292,12 @@ jobs:
           rm -f /tmp/.X0-lock /tmp/.X11-unix/X0 2>/dev/null || true
           sleep 2
           
-          # Start VNC with security fixes to prevent "too many security failures"
+          # Start VNC with explicit password file and security settings
           vncserver :0 \
             -geometry 1920x1080 \
             -depth 24 \
             -localhost no \
+            -rfbauth ~/.vnc/passwd \
             -SecurityTypes VncAuth \
             -UseBlacklist=0 \
             -BlacklistThreshold=100 \
@@ -304,6 +312,11 @@ jobs:
             fi
             sleep 1
           done
+          
+          # Verify password file is being used (should show ~/.vnc/passwd, not /tmp/)
+          echo ""
+          echo "=== VNC Process (verifying password file) ==="
+          ps aux | grep Xtigervnc | grep -v grep | grep -o "PasswordFile [^ ]*"
           
           # Display status
           echo ""
@@ -447,6 +460,7 @@ jobs:
                 -geometry 1920x1080 \
                 -depth 24 \
                 -localhost no \
+                -rfbauth ~/.vnc/passwd \
                 -SecurityTypes VncAuth \
                 -UseBlacklist=0 \
                 -BlacklistThreshold=100 \
