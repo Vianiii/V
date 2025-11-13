@@ -8,7 +8,7 @@ on:
 jobs:
   kde-desktop:
     runs-on: ubuntu-latest
-
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,7 +20,7 @@ jobs:
           mkdir -p /mnt/storage/android-sdk
           mkdir -p /mnt/storage/android-avd
           df -h /mnt
-
+          
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -59,10 +59,10 @@ jobs:
           unzip -q commandlinetools-*.zip
           mkdir -p cmdline-tools/latest
           mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
-
+          
           export ANDROID_HOME=/mnt/storage/android-sdk
           export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
-
+          
           yes | cmdline-tools/latest/bin/sdkmanager --licenses
           cmdline-tools/latest/bin/sdkmanager \
             "platform-tools" "platforms;android-34" "build-tools;34.0.0" \
@@ -90,15 +90,11 @@ jobs:
       - name: Configure VNC
         run: |
           mkdir -p ~/.vnc
-
-          # Create persistent password file
-          echo "github2024" | vncpasswd -f > ~/.vnc/passwd
-          chmod 600 ~/.vnc/passwd
-
-          # Force Xtigervnc to use ~/.vnc/passwd
-          echo 'export Xtigervnc_PASSWD_FILE=~/.vnc/passwd' >> ~/.bashrc
-          export Xtigervnc_PASSWD_FILE=~/.vnc/passwd
-
+          
+          # Create password
+          (echo github2024; echo github2024; echo n) | vncpasswd
+          ls -la ~/.vnc/passwd
+          
           cat > ~/.vnc/xstartup << 'EOF'
           #!/bin/bash
           unset SESSION_MANAGER DBUS_SESSION_BUS_ADDRESS
@@ -110,18 +106,31 @@ jobs:
           EOF
           chmod +x ~/.vnc/xstartup
 
-          cat > ~/.vnc/config << 'EOF'
-          geometry=1920x1080
-          depth=24
-          localhost=no
-          alwaysshared=true
-          EOF
-
-      - name: Start VNC
+      - name: Start VNC with Security Fix
         run: |
-          export Xtigervnc_PASSWD_FILE=~/.vnc/passwd
-          vncserver :0 -geometry 1920x1080 -depth 24 -localhost no
+          pkill -9 Xtigervnc 2>/dev/null || true
+          rm -f /tmp/.X0-lock /tmp/.X11-unix/X0 2>/dev/null || true
+          
+          # Start VNC with blacklist disabled
+          /usr/bin/Xtigervnc :0 \
+            -geometry 1920x1080 \
+            -depth 24 \
+            -rfbport 5900 \
+            -rfbauth ~/.vnc/passwd \
+            -SecurityTypes VncAuth \
+            -UseBlacklist=0 \
+            -BlacklistThreshold=100 \
+            -BlacklistTimeout=1 \
+            -localhost=0 \
+            -AlwaysShared=1 \
+            -desktop "GitHub KDE" &
+          
           sleep 5
+          
+          # Start desktop
+          export DISPLAY=:0
+          ~/.vnc/xstartup &
+          
           pgrep -f "Xtigervnc.*:0" || exit 1
           echo "✅ VNC Started"
           sudo netstat -tulpn | grep 5900
@@ -130,7 +139,7 @@ jobs:
         run: |
           wget -q https://github.com/fatedier/frp/releases/download/v0.60.0/frp_0.60.0_linux_amd64.tar.gz
           tar -xzf frp_*.tar.gz && mv frp_*_linux_amd64 frp
-
+          
           cat > frp/frpc.toml << 'EOF'
           serverAddr = "159.195.6.61"
           serverPort = 7000
@@ -141,7 +150,7 @@ jobs:
           localPort = 5900
           remotePort = 5900
           EOF
-
+          
           cd frp && nohup ./frpc -c frpc.toml > frpc.log 2>&1 &
           sleep 3
 
@@ -150,16 +159,19 @@ jobs:
           echo "╔══════════════════════════════════════════╗"
           echo "║  📡 VNC: 159.195.6.61:5900              ║"
           echo "║  🔑 Password: github2024                 ║"
-          echo "║  🚀 Android Studio:                      ║"
-          echo "║     /mnt/storage/android-studio/bin/studio.sh"
+          echo "║  🔒 Security: Blacklist DISABLED         ║"
           echo "╚══════════════════════════════════════════╝"
 
       - name: Keep Alive
         run: |
-          export Xtigervnc_PASSWD_FILE=~/.vnc/passwd
           while true; do
-            pgrep -f "Xtigervnc.*:0" || vncserver :0 -geometry 1920x1080 -depth 24 -localhost no
+            if ! pgrep -f "Xtigervnc.*:0" > /dev/null; then
+              /usr/bin/Xtigervnc :0 -geometry 1920x1080 -depth 24 -rfbport 5900 -rfbauth ~/.vnc/passwd -SecurityTypes VncAuth -UseBlacklist=0 -BlacklistThreshold=100 -BlacklistTimeout=1 -localhost=0 -AlwaysShared=1 -desktop "GitHub KDE" &
+              sleep 3
+              export DISPLAY=:0
+              ~/.vnc/xstartup &
+            fi
             pgrep -f "frpc" || (cd frp && nohup ./frpc -c frpc.toml >> frpc.log 2>&1 &)
-            echo "✅ $(date '+%H:%M:%S') - Active | RAM: $(free -h | grep Mem | awk '{print $3}')"
+            echo "✅ $(date '+%H:%M:%S') - Active"
             sleep 180
           done
