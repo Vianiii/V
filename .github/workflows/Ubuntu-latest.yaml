@@ -1,0 +1,180 @@
+name: ubuntu latest
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  kde-desktop:
+    runs-on: ubuntu-24.04
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up /mnt storage
+        run: |
+          sudo mkdir -p /mnt/storage
+          sudo chmod 777 /mnt/storage
+          mkdir -p /mnt/storage/android-sdk
+          mkdir -p /mnt/storage/android-avd
+          df -h /mnt
+          
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo chmod 666 /dev/kvm 2>/dev/null || true
+          ls -la /dev/kvm
+
+      - name: Install KDE Plasma Desktop
+        run: |
+          echo "Installing KDE Plasma 🎨"
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            kde-plasma-desktop plasma-nm konsole dolphin kate firefox \
+            tigervnc-standalone-server tigervnc-common dbus-x11 \
+            fonts-noto-color-emoji wget curl net-tools htop \
+            openjdk-17-jdk unzip cpu-checker
+          echo "✅ KDE Plasma installed!"
+
+      - name: Configure User
+        run: |
+          echo "runner:github2024" | sudo chpasswd
+          mkdir -p ~/.config
+          cat > ~/.config/kscreenlockerrc << 'EOF'
+          [Daemon]
+          Autolock=false
+          LockOnResume=false
+          Timeout=0
+          EOF
+          echo "✅ User configured"
+
+      - name: Install Android SDK
+        run: |
+          cd /mnt/storage/android-sdk
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q commandlinetools-*.zip
+          mkdir -p cmdline-tools/latest
+          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+          
+          export ANDROID_HOME=/mnt/storage/android-sdk
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin
+          
+          yes | cmdline-tools/latest/bin/sdkmanager --licenses
+          cmdline-tools/latest/bin/sdkmanager \
+            "platform-tools" "platforms;android-34" "build-tools;34.0.0" \
+            "emulator" "system-images;android-34;google_apis;x86_64"
+          echo "✅ SDK installed"
+
+      - name: Download Android Studio
+        run: |
+          cd /mnt/storage
+          wget -q https://redirectingat.com/?id=1011l528K&xs=1&url=https%3A%2F%2Fdl.google.com%2Fandroid%2Fstudio%2Fide-zips%2F2025.2.1.7%2Fandroid-studio-2025.2.1.7-linux.tar.gz -O android-studio-2025.2.1.7-linux.tar.gz || \
+          wget -q https://dl.google.com/android/studio/ide-zips/2025.2.1.7/android-studio-2025.2.1.7-linux.tar.gz || exit 0
+          tar -xzf android-studio-*.tar.gz 2>/dev/null || exit 0
+          rm -f android-studio-*.tar.gz
+          echo "✅ Android Studio Otter 2025.2.1 ready"
+
+      - name: Setup Environment
+        run: |
+          mkdir -p ~/.profile.d
+          cat > ~/.profile.d/android.sh << 'EOF'
+          export ANDROID_HOME=/mnt/storage/android-sdk
+          export ANDROID_SDK_ROOT=/mnt/storage/android-sdk
+          export ANDROID_AVD_HOME=/mnt/storage/android-avd
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator
+          EOF
+
+      - name: Configure VNC
+        run: |
+          mkdir -p ~/.vnc
+          
+          # Create password
+          (echo github2024; echo github2024; echo n) | vncpasswd
+          ls -la ~/.vnc/passwd
+          
+          cat > ~/.vnc/xstartup << 'EOF'
+          #!/bin/bash
+          unset SESSION_MANAGER DBUS_SESSION_BUS_ADDRESS
+          [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && eval $(dbus-launch --sh-syntax)
+          xsetroot -solid "#1e1e2e"
+          [ -f ~/.profile.d/android.sh ] && source ~/.profile.d/android.sh
+          export KDE_SKIP_KSCREENLOCKER=1 XDG_SESSION_TYPE=x11 XDG_CURRENT_DESKTOP=KDE
+          startplasma-x11
+          EOF
+          chmod +x ~/.vnc/xstartup
+
+      - name: Start VNC with Security Fix
+        run: |
+          pkill -9 Xtigervnc 2>/dev/null || true
+          rm -f /tmp/.X0-lock /tmp/.X11-unix/X0 2>/dev/null || true
+          
+          # Start VNC with blacklist disabled
+          /usr/bin/Xtigervnc :0 \
+            -geometry 1920x1080 \
+            -depth 24 \
+            -rfbport 5900 \
+            -rfbauth ~/.vnc/passwd \
+            -SecurityTypes VncAuth \
+            -UseBlacklist=0 \
+            -BlacklistThreshold=100 \
+            -BlacklistTimeout=1 \
+            -localhost=0 \
+            -AlwaysShared=1 \
+            -desktop "GitHub KDE" &
+          
+          sleep 5
+          
+          # Start desktop
+          export DISPLAY=:0
+          ~/.vnc/xstartup &
+          
+          pgrep -f "Xtigervnc.*:0" || exit 1
+          echo "✅ VNC Started"
+          sudo netstat -tulpn | grep 5900
+
+      - name: Setup FRP
+        run: |
+          wget -q https://github.com/fatedier/frp/releases/download/v0.60.0/frp_0.60.0_linux_amd64.tar.gz
+          tar -xzf frp_*.tar.gz && mv frp_*_linux_amd64 frp
+          
+          cat > frp/frpc.toml << 'EOF'
+          serverAddr = "159.195.6.61"
+          serverPort = 7000
+          [[proxies]]
+          name = "vnc"
+          type = "tcp"
+          localIP = "127.0.0.1"
+          localPort = 5900
+          remotePort = 5900
+          EOF
+          
+          cd frp && nohup ./frpc -c frpc.toml > frpc.log 2>&1 &
+          sleep 3
+
+      - name: Display Info
+        run: |
+          echo "╔══════════════════════════════════════════╗"
+          echo "║  📡 VNC: 159.195.6.61:5900              ║"
+          echo "║  🔑 Password: github2024                 ║"
+          echo "║  🔒 Security: Blacklist DISABLED         ║"
+          echo "║  📱 Android Studio: Otter 2025.2.1      ║"
+          echo "║  💻 OS: Ubuntu 24.04                     ║"
+          echo "╚══════════════════════════════════════════╝"
+
+      - name: Keep Alive
+        run: |
+          while true; do
+            if ! pgrep -f "Xtigervnc.*:0" > /dev/null; then
+              /usr/bin/Xtigervnc :0 -geometry 1920x1080 -depth 24 -rfbport 5900 -rfbauth ~/.vnc/passwd -SecurityTypes VncAuth -UseBlacklist=0 -BlacklistThreshold=100 -BlacklistTimeout=1 -localhost=0 -AlwaysShared=1 -desktop "GitHub KDE" &
+              sleep 3
+              export DISPLAY=:0
+              ~/.vnc/xstartup &
+            fi
+            pgrep -f "frpc" || (cd frp && nohup ./frpc -c frpc.toml >> frpc.log 2>&1 &)
+            echo "✅ $(date '+%H:%M:%S') - Active"
+            sleep 180
+          done
